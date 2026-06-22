@@ -237,8 +237,9 @@
 
   <div class="view hide" id="view-inventario">
     <div class="tbar"><h3 class="vh">📦 ¿Cuánto dinero tengo y dónde?</h3>
-      <div class="row" style="gap:8px"><input type="text" id="invSearch" placeholder="🔍 Buscar SKU o producto…" style="width:220px"><button class="btn ghost sm" id="invNegBtn" title="Ver solo productos con saldo negativo">⚠️ Negativos</button><button class="btn ghost sm" id="invExport">⬇️ CSV</button></div></div>
+      <div class="row" style="gap:8px"><input type="text" id="invSearch" placeholder="🔍 Buscar SKU o producto…" style="width:220px"><button class="btn ghost sm" id="invNegBtn" title="Ver solo productos con saldo negativo">⚠️ Negativos</button><button class="btn ghost sm" id="invNoFotoBtn" title="Ver solo productos SIN foto">📷 Sin foto</button><button class="btn ghost sm" id="invExport">⬇️ CSV</button></div></div>
     <div class="row" style="align-items:center;gap:10px;margin:0 0 10px"><button class="btn sm" id="btnFotos" title="Trae las fotos de tu tienda y las guarda en tu nube">📸 Importar mis fotos</button><span id="fotoMsg" class="hint"></span></div>
+    <input type="file" id="fotoUpload" accept="image/*" style="display:none">
     <div id="invKpis" class="kpis"></div>
     <h3 class="vh" style="font-size:14px">Detalle de tus productos con venta</h3>
     <div class="tablewrap"><table><thead><tr id="invHead"></tr></thead><tbody id="invBody"></tbody></table></div>
@@ -278,7 +279,7 @@ const SB_KEY='sb_publishable_b7Tt6IffSjZKnllb3LHjOg_stTUC8z5';
 const CLOUD_ON = !!(window.supabase && SB_URL && SB_KEY && location.protocol.indexOf('http')===0);
 let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null;
 if(CLOUD_ON){ try{ SB=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}); }catch(e){ console.error('Supabase init:',e); } }
-let DIAGSKU="", INVNEG=false;
+let DIAGSKU="", INVNEG=false, INVNOFOTO=false, FOTOSEL="";
 function saveHidden(){ saveJSON(LS_HIDDEN,[...HIDDEN]); }
 function nowTs(){ return Date.now(); }
 let RAWFULL=null, FULLMAP={sku:'',full:'',camino:''};
@@ -759,7 +760,7 @@ function renderInventario(){
      <div class="kpi blue"><div class="lbl">🏬 Dinero en FULL</div><div class="val">${IT.fullVal>0?mxn.format(IT.fullVal):'—'}</div><div class="sub">${num.format(IT.fullUds)} uds · ${IT.fullSkus} SKUs (stock real ML)</div></div>
      <div class="kpi good"><div class="lbl">💰 Total en inventario</div><div class="val">${IT.total>0?mxn.format(IT.total):'—'}</div><div class="sub">todo tu dinero almacenado</div></div>`;
   $('invHead').innerHTML=thS('Producto','nombre',INVSORT)+thS('Bodega','bodega',INVSORT)+thS('En Full','full',INVSORT)+thS('En camino','camino',INVSORT)+thS('Total','total',INVSORT)+thS('Días de venta','covTotal',INVSORT)+thS('Costo/u','costo',INVSORT)+thS('Valor','valorInv',INVSORT)+'<th></th>';
-  const _q=norm(INVSEARCH); const rows=sortRows(COMPUTED.filter(p=>p.inv&&!HIDDEN.has(p.key)&&(!INVNEG||p.bodega<0||p.full<0||p.total<0)&&(!_q||norm((p.nombre||'')+' '+(p.key||'')).includes(_q))), INVSORT.key, INVSORT.dir);
+  const _q=norm(INVSEARCH); const rows=sortRows(COMPUTED.filter(p=>p.inv&&!HIDDEN.has(p.key)&&(!INVNEG||p.bodega<0||p.full<0||p.total<0)&&(!INVNOFOTO||!FOTOS[p.key])&&(!_q||norm((p.nombre||'')+' '+(p.key||'')).includes(_q))), INVSORT.key, INVSORT.dir);
   $('invBody').innerHTML=rows.map(p=>{
     if(INVEDIT===p.key){ const ov=OVERRIDES[p.key]||{}; const cv=(ov.costo!=null&&ov.costo!=='')?ov.costo:(p.costo?round2(p.costo):'');
       return `<tr class="editing"><td colspan="9"><div class="row" style="gap:8px;align-items:flex-end;padding:4px 0">
@@ -776,7 +777,7 @@ function renderInventario(){
       <td class="${p.bodega<0?'m-bad':''}">${num.format(p.bodega)}</td><td class="${p.full<0?'m-bad':''}">${num.format(p.full)}</td><td>${p.camino?num.format(p.camino):'—'}</td>
       <td><b>${num.format(p.total)}</b></td><td>${p.velDia>0?covTxt(p.covTotal)+' d':'—'}</td>
       <td>${p.esKit?`<span title="Costo calculado con sus piezas en 🧩 Kits / Recetas" style="cursor:help;white-space:nowrap">${mxn2.format(p.costo)} <span style="font-size:10px;background:var(--accent,#e4846d);color:#fff;padding:1px 5px;border-radius:6px">🧩 kit</span></span>`:`<input type="number" class="invCostEdit" data-key="${encodeURIComponent(p.key)}" value="${p.costo?round2(p.costo):''}" placeholder="?" min="0" step="0.01" style="width:78px">`}</td><td>${mxn.format(p.valorInv)}</td>
-      <td style="white-space:nowrap"><button class="btn ghost sm invDiag" data-key="${encodeURIComponent(p.key)}" title="Ver de dónde sale el saldo">🔍</button> <button class="btn ghost sm invEdit" data-key="${encodeURIComponent(p.key)}" title="Editar nombre, publicación y costo">✏️</button> <button class="btn ghost sm invHide" data-key="${encodeURIComponent(p.key)}" title="Quitar del ERP">🗑️</button></td></tr>`+(DIAGSKU===p.key?diagRow(p):'');
+      <td style="white-space:nowrap"><button class="btn ghost sm invFoto" data-key="${encodeURIComponent(p.key)}" title="${FOTOS[p.key]?'Cambiar foto':'Agregar foto'}"${FOTOS[p.key]?'':' style="background:var(--blush,#f3e3da)"'}>📷</button> <button class="btn ghost sm invDiag" data-key="${encodeURIComponent(p.key)}" title="Ver de dónde sale el saldo">🔍</button> <button class="btn ghost sm invEdit" data-key="${encodeURIComponent(p.key)}" title="Editar nombre, publicación y costo">✏️</button> <button class="btn ghost sm invHide" data-key="${encodeURIComponent(p.key)}" title="Quitar del ERP">🗑️</button></td></tr>`+(DIAGSKU===p.key?diagRow(p):'');
   }).join('')||`<tr><td colspan="9" class="empty">Sube tu reporte de Full y tu hoja de inventario.</td></tr>`;
   const tBod=rows.reduce((a,p)=>a+Math.max(0,p.bodega)*p.costo,0), tFull=rows.reduce((a,p)=>a+(p.full+p.camino)*p.costo,0);
   $('invFoot').innerHTML=rows.length?`Valor en bodega: <b>${mxn.format(tBod)}</b> · valor en Full: <b>${mxn.format(tFull)}</b> · total: <b>${mxn.format(tBod+tFull)}</b>.`:'';
@@ -1029,6 +1030,8 @@ $('rentabSearch').addEventListener('input',e=>{ RSEARCH=e.target.value; renderRe
 $('invSearch').addEventListener('input',e=>{ INVSEARCH=e.target.value; renderInventario(); });
 if($('invNegBtn')) $('invNegBtn').addEventListener('click',()=>{ INVNEG=!INVNEG; renderInventario(); });
 if($('btnFotos')) $('btnFotos').addEventListener('click',importarFotos);
+if($('invNoFotoBtn')) $('invNoFotoBtn').addEventListener('click',()=>{ INVNOFOTO=!INVNOFOTO; renderInventario(); });
+if($('fotoUpload')) $('fotoUpload').addEventListener('change',e=>{ const f=e.target.files[0]; if(f) uploadFotoManual(f); e.target.value=''; });
 $('reabSearch').addEventListener('input',e=>{ REABSEARCH=e.target.value; renderReabasto(); });
 function copyText(t){ try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t); return true; } }catch(e){}
   try{ const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); return true; }catch(e){ return false; } }
@@ -1288,6 +1291,7 @@ $('view-recetas').addEventListener('click',e=>{
 });
 $('view-recetas').addEventListener('change',e=>{ const t=e.target; if(t.classList&&t.classList.contains('recCompQtyEdit')){ const i=+t.dataset.i; if(RECBUILD[i]){ RECBUILD[i].qty=Math.max(1,parseNum(t.value)||1); renderRecetas(); } } });
 $('view-inventario').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return;
+  if(b.classList.contains('invFoto')){ FOTOSEL=decodeURIComponent(b.dataset.key); const fu=$('fotoUpload'); if(fu){ fu.value=''; fu.click(); } return; }
   if(b.classList.contains('invDiag')){ const k=decodeURIComponent(b.dataset.key); DIAGSKU=(DIAGSKU===k?'':k); renderInventario(); return; }
   if(b.classList.contains('invDiagClose')){ DIAGSKU=''; renderInventario(); return; }
   if(b.classList.contains('invEdit')){ INVEDIT=decodeURIComponent(b.dataset.key); renderInventario(); }
@@ -1387,6 +1391,21 @@ async function importarFotos(){
   saveJSON(LS_FOTOS,FOTOS);
   fotoMsgSet('✅ Listo: '+nuevas+' fotos nuevas · '+perm+' guardadas permanentes en tu nube'+(fail?(' · '+fail+' no se pudieron (vuelve a darle para reintentar)'):'')+'.');
   if(typeof refresh==='function') refresh();
+}
+async function uploadFotoManual(file){
+  const sku=FOTOSEL; if(!sku||!file) return;
+  if(!(CLOUD_ON&&SB&&CLOUD_USER)){ alert('Para subir fotos, abre tu app desde tu link en línea (entrando con tu correo). En el archivo local no se guardan en la nube.'); return; }
+  if(!/^image\//.test(file.type||'')){ alert('Elige una imagen (JPG, PNG o WEBP).'); return; }
+  if(file.size>8*1024*1024){ alert('Esa imagen pesa mucho ('+Math.round(file.size/1048576)+' MB). Usa una de menos de 8 MB.'); return; }
+  fotoMsgSet('Subiendo foto de '+escapeHtml(nombreDe(sku))+'…');
+  try{
+    const ext=((file.type.split('/')[1]||'jpg').split(';')[0]).replace(/[^a-z0-9]/gi,'')||'jpg';
+    const path=CLOUD_USER.id+'/'+sku.replace(/[^a-zA-Z0-9_.-]/g,'_')+'.'+ext;
+    const up=await SB.storage.from('fotos').upload(path, file, {upsert:true, contentType:file.type||'image/jpeg'});
+    if(up.error) throw up.error;
+    FOTOS[sku]=SB.storage.from('fotos').getPublicUrl(path).data.publicUrl+'?v='+Date.now();
+    saveJSON(LS_FOTOS,FOTOS); fotoMsgSet('✅ Foto guardada para '+escapeHtml(nombreDe(sku))+'.'); renderInventario();
+  }catch(e){ fotoMsgSet(''); alert('No se pudo subir la foto: '+(e.message||e)); }
 }
 function bootLocal(){
   loadCfg();
