@@ -912,21 +912,27 @@ async function onPubFile(file){ const msg=$('pubMsg'); if(msg) msg.innerHTML='<s
     if(h<0) for(let i=0;i<Math.min(12,grid.length);i++){ const rn=(grid[i]||[]).map(x=>norm(x)); if(rn.some(c=>c.includes('numero de publicacion'))&&rn.some(c=>c==='sku')){ h=i; break; } }
     if(h<0) throw new Error('No encontré las columnas de # de publicación y SKU.');
     const hdrU=(grid[h]||[]).map(x=>(''+x).toUpperCase().trim()), hdrN=(grid[h]||[]).map(x=>norm(x)); const c=pubColIdx(hdrU,hdrN);
+    let statusCol=hdrN.findIndex(x=>x==='estado'||x==='status'||(x.includes('estado')&&x.includes('public'))); if(statusCol<0) statusCol=hdrN.findIndex(x=>x.includes('estado')||x.includes('status'));
     if(c.item<0||c.sku<0) throw new Error('Faltan columnas de # de publicación o SKU.');
-    const idx={}; let nSku=0;
+    const idx={}; let nSku=0, nPausadas=0;
     for(let i=h+1;i<grid.length;i++){ const r=grid[i]||[]; const pub=(''+(r[c.item]||'')).trim(); if(!/MLM\d+/.test(pub)) continue;
+      if(statusCol>=0 && /pausad|finaliz|cerrad|closed|paused|inactiv|eliminad/.test(norm(r[statusCol]||''))){ nPausadas++; continue; }   // ignora pausadas/finalizadas → no ensucian
       const sku=(''+(r[c.sku]||'')).trim(), title=(c.title>=0?(''+(r[c.title]||'')).trim():''), variante=(c.variations>=0?(''+(r[c.variations]||'')).trim():''), stock=c.qty>=0?parseNum(r[c.qty]):0, precio=c.price>=0?parseNum(r[c.price]):0;
       if(!idx[pub]) idx[pub]={pub,titulo:'',skus:[]}; if(title&&!idx[pub].titulo) idx[pub].titulo=title;
       if(sku){ idx[pub].skus.push({sku,variante,stock,precio}); if(title&&!PUBNAME[sku]) PUBNAME[sku]=title; const dig=pub.replace(/\D/g,''); if(dig&&!PUBID[sku]) PUBID[sku]=dig; nSku++; } }
     for(const pp in idx){ const tt=idx[pp].titulo||''; if(!tt) continue; const multi=[...new Set(idx[pp].skus.map(s=>s.sku))].length>1; for(const sv of idx[pp].skus){ const suf=(sv.variante&&sv.variante!=='-')?' · '+sv.variante:''; if(multi&&suf) PUBNAME[sv.sku]=tt+suf; else if(!PUBNAME[sv.sku]) PUBNAME[sv.sku]=tt+suf; } }
     PUBINDEX=idx; saveJSON(LS_PUBINDEX,PUBINDEX); saveJSON(LS_PUBNAME,PUBNAME); saveJSON(LS_PUB,PUBID);
-    if(msg) msg.innerHTML='✓ Leí <b>'+Object.keys(idx).length+'</b> publicaciones ('+nSku+' SKUs). Nombres actualizados; la conciliación está al final de 📦 Inventario.';
+    if(msg) msg.innerHTML='✓ Leí <b>'+Object.keys(idx).length+'</b> publicaciones activas ('+nSku+' SKUs)'+(nPausadas?(' · ignoré <b>'+nPausadas+'</b> pausadas/finalizadas'):'')+'. Nombres actualizados; la conciliación está al final de 📦 Inventario.';
     ensureProductsForInventory(); refresh(); showTab('inventario'); window.scrollTo(0,0);
   }catch(e){ if(msg) msg.textContent=''; alert('No pude leer publicaciones: '+(e.message||e)); } }
 function renderConciliacion(){ const v=$('concBox'); if(!v) return;
   const pubs=Object.values(PUBINDEX);
   if(!pubs.length){ v.innerHTML=''; return; }
   const pubSkus=new Set(); let nVar=0; pubs.forEach(p=>p.skus.forEach(s=>{pubSkus.add(s.sku);nVar++;}));
+  // también cuenta como PUBLICADO lo que ya vendió (tiene # de publicación en tus ventas) o lo que enlazaste a mano,
+  // aunque tu export de "Mis publicaciones" venga filtrado/incompleto (ej. sin zapatos)
+  for(const k in PUBID){ if(PUBID[k]) pubSkus.add(k); }
+  for(const k in OVERRIDES){ if(OVERRIDES[k]&&OVERRIDES[k].pub) pubSkus.add(k); }
   const bod=LIVE_ON()?LIVE.bodega:BODEGA; const conStock=k=>parseNum(bod[k])>0;
   const sinPub=Object.keys(bod).filter(k=>conStock(k)&&!pubSkus.has(k)&&!HIDDEN.has(k)).map(k=>({sku:k,nombre:nombreDe(k),stock:parseNum(bod[k]),valor:parseNum(bod[k])*ownCost(k)})).sort((a,b)=>b.valor-a.valor);
   const sinBod=[...pubSkus].filter(k=>!conStock(k)&&!HIDDEN.has(k)).map(k=>({sku:k,nombre:nombreDe(k)})).sort((a,b)=>(''+a.nombre).localeCompare(''+b.nombre,'es'));
