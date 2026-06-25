@@ -237,7 +237,7 @@
 
   <div class="view hide" id="view-inventario">
     <div class="tbar"><h3 class="vh">📦 ¿Cuánto dinero tengo y dónde?</h3>
-      <div class="row" style="gap:8px"><input type="text" id="invSearch" placeholder="🔍 Buscar SKU o producto…" style="width:220px"><button class="btn ghost sm" id="invNegBtn" title="Ver solo productos con saldo negativo">⚠️ Negativos</button><button class="btn ghost sm" id="invNoFotoBtn" title="Ver solo productos SIN foto">📷 Sin foto</button><button class="btn ghost sm" id="invExport">⬇️ CSV</button></div></div>
+      <div class="row" style="gap:8px"><input type="text" id="invSearch" placeholder="🔍 Buscar SKU o producto…" style="width:220px"><button class="btn ghost sm" id="invNegBtn" title="Ver solo productos con saldo negativo">⚠️ Negativos</button><button class="btn ghost sm" id="invNoFotoBtn" title="Ver solo productos SIN foto">📷 Sin foto</button><button class="btn ghost sm" id="invCountBtn" title="Ver solo lo que falta por contar">📋 Por contar</button><button class="btn ghost sm" id="invActBtn" title="Mostrar solo productos de publicaciones activas">🔕 Solo activos</button><button class="btn ghost sm" id="invExport">⬇️ CSV</button></div></div>
     <div class="row" style="align-items:center;gap:10px;margin:0 0 10px"><button class="btn sm" id="btnFotos" title="Trae las fotos de tu tienda y las guarda en tu nube">📸 Importar mis fotos</button><span id="fotoMsg" class="hint"></span></div>
     <input type="file" id="fotoUpload" accept="image/*" style="display:none">
     <div id="invSelBar" class="row" style="display:none;align-items:center;gap:10px;margin:0 0 10px;padding:8px 12px;background:var(--good-bg,#eaf7ef);border-radius:9px"><b id="invSelCount">0 seleccionados</b><button class="btn sm" id="btnFotoBulk">📷 Subir 1 foto a los seleccionados</button><span id="fotoBulkMsg" class="hint"></span><button class="btn ghost sm" id="btnSelClear" style="margin-left:auto">Limpiar selección</button></div>
@@ -259,7 +259,7 @@
 
 <script>
 "use strict";
-const LS_OVR="ml_ovr_v3", LS_CFG="ml_cfg_v3", LS_FULL="ml_full_v3", LS_CAM="ml_cam_v3", LS_COST="ml_cost_v3", LS_BOD="ml_bod_v3", LS_FNAME="ml_fname_v3", LS_INAME="ml_iname_v3", LS_PUB="ml_pub_v3", LS_MOVS="ml_movs_v3", LS_APPLIED="ml_applied_v3", LS_PRODS="ml_prods_v3", LS_MAP="ml_map_v3", LS_MODE="ml_mode_v3", LS_RECETA="ml_receta_v3", LS_PUBNAME="ml_pubname_v3", LS_PUBINDEX="ml_pubindex_v3", LS_LINES="ml_lines_v3", LS_RECTS="ml_rects_v3", LS_HIDDEN="ml_hidden_v3", LS_SALES="ml_sales_v3", LS_SALEFILTER="ml_salefilter_v3", LS_INVCORTE="ml_invcorte_v3", LS_GASTOSMES="ml_gastosmes_v3", LS_REABRANGE="ml_reabrange_v3", LS_FOTOS="ml_fotos_v3";
+const LS_OVR="ml_ovr_v3", LS_CFG="ml_cfg_v3", LS_FULL="ml_full_v3", LS_CAM="ml_cam_v3", LS_COST="ml_cost_v3", LS_BOD="ml_bod_v3", LS_FNAME="ml_fname_v3", LS_INAME="ml_iname_v3", LS_PUB="ml_pub_v3", LS_MOVS="ml_movs_v3", LS_APPLIED="ml_applied_v3", LS_PRODS="ml_prods_v3", LS_MAP="ml_map_v3", LS_MODE="ml_mode_v3", LS_RECETA="ml_receta_v3", LS_PUBNAME="ml_pubname_v3", LS_PUBINDEX="ml_pubindex_v3", LS_LINES="ml_lines_v3", LS_RECTS="ml_rects_v3", LS_HIDDEN="ml_hidden_v3", LS_SALES="ml_sales_v3", LS_SALEFILTER="ml_salefilter_v3", LS_INVCORTE="ml_invcorte_v3", LS_GASTOSMES="ml_gastosmes_v3", LS_REABRANGE="ml_reabrange_v3", LS_FOTOS="ml_fotos_v3", LS_COUNTED="ml_counted_v3";
 let RAW=null, MAPPING={}, PRODUCTS=[], COMPUTED=[];
 let OVERRIDES=loadJSON(LS_OVR,{});
 let FULL=loadJSON(LS_FULL,{}), CAMINO=loadJSON(LS_CAM,{}), COST=loadJSON(LS_COST,{}), BODEGA=loadJSON(LS_BOD,{});
@@ -280,7 +280,7 @@ const SB_KEY='sb_publishable_b7Tt6IffSjZKnllb3LHjOg_stTUC8z5';
 const CLOUD_ON = !!(window.supabase && SB_URL && SB_KEY && location.protocol.indexOf('http')===0);
 let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null;
 if(CLOUD_ON){ try{ SB=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}); }catch(e){ console.error('Supabase init:',e); } }
-let DIAGSKU="", INVNEG=false, INVNOFOTO=false, FOTOSEL="", SELSKU=new Set(), FOTOMODE='single', INVUBIC="";
+let DIAGSKU="", INVNEG=false, INVNOFOTO=false, FOTOSEL="", SELSKU=new Set(), FOTOMODE='single', INVUBIC="", INVSOLOACT=loadJSON('ml_invact_v3',false), INVPEND=false, COUNTED=loadJSON(LS_COUNTED,{});
 function saveHidden(){ saveJSON(LS_HIDDEN,[...HIDDEN]); }
 function nowTs(){ return Date.now(); }
 let RAWFULL=null, FULLMAP={sku:'',full:'',camino:''};
@@ -288,7 +288,7 @@ let RAWINV=null, INVMAP={sku:'',cost:'',stock:'',ubi:''};
 let MODE="estimate", TAB="resumen";
 let RSORT={key:"ganTotal",dir:-1}, RSEARCH="", INVSEARCH="", REABSEARCH="", MOVSEARCH="", RENTDETAIL="";
 function norm(s){ return (''+s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase(); }
-let INVSORT={key:'valorInv',dir:-1}, FSORT={key:'ganTotal',dir:-1}, PSORT={key:'ganTotal',dir:-1}, MSORT={key:'',dir:-1};
+let INVSORT={key:'valorInv',dir:-1}, FSORT={key:'ganTotal',dir:-1}, PSORT={key:'ganTotal',dir:-1}, MSORT={key:'fecha',dir:-1};
 function sortRows(rows,key,dir){ if(!key) return rows; return rows.slice().sort((a,b)=>{ let x=a[key],y=b[key]; if(typeof x==='string'||typeof y==='string') return dir*(''+(x==null?'':x)).localeCompare(''+(y==null?'':y),'es',{numeric:true}); x=isFinite(+x)?+x:(dir<0?-Infinity:Infinity); y=isFinite(+y)?+y:(dir<0?-Infinity:Infinity); return dir*(x-y); }); }
 function thS(label,key,sort){ return '<th class="sortable" data-k="'+key+'">'+label+(sort.key===key?(sort.dir<0?' ▾':' ▴'):'')+'</th>'; }
 
@@ -796,7 +796,10 @@ function renderInventario(){
      <div class="kpi blue" data-ubic="full" style="cursor:pointer${act('full')}"><div class="lbl">🏬 Dinero en FULL${vstag('full')}</div><div class="val">${IT.fullVal>0?mxn.format(IT.fullVal):'—'}</div><div class="sub">${num.format(IT.fullUds)} uds · ${IT.fullSkus} SKUs · 🔎 clic para ver solo Full</div></div>
      <div class="kpi good" data-ubic="" style="cursor:pointer"><div class="lbl">💰 Total en inventario</div><div class="val">${IT.total>0?mxn.format(IT.total):'—'}</div><div class="sub">${INVUBIC?'🔎 clic para ver TODO':'todo tu dinero almacenado'}</div></div>`;
   $('invHead').innerHTML='<th style="width:30px;text-align:center"><input type="checkbox" id="invChkAll" title="Seleccionar todos los de la lista"></th>'+thS('Producto','nombre',INVSORT)+thS('Bodega','bodega',INVSORT)+thS('En Full','full',INVSORT)+thS('En camino','camino',INVSORT)+thS('Total','total',INVSORT)+thS('Días de venta','covTotal',INVSORT)+thS('Costo/u','costo',INVSORT)+thS('Valor','valorInv',INVSORT)+'<th></th>';
-  const _q=norm(INVSEARCH); const rows=sortRows(COMPUTED.filter(p=>p.inv&&!HIDDEN.has(p.key)&&(!INVNEG||p.bodega<0||p.full<0||p.total<0)&&(!INVNOFOTO||!FOTOS[p.key])&&(!INVUBIC||(INVUBIC==='bodega'?p.bodega>0:(p.full>0||p.camino>0)))&&(!_q||norm((p.nombre||'')+' '+(p.key||'')).includes(_q))), INVSORT.key, INVSORT.dir);
+  const _q=norm(INVSEARCH);
+  const _pubAct=Object.keys(PUBINDEX).length>0, _actSkus=new Set(); if(_pubAct) Object.values(PUBINDEX).forEach(p=>(p.skus||[]).forEach(s=>_actSkus.add(s.sku)));
+  const _invAll=COMPUTED.filter(p=>p.inv&&!HIDDEN.has(p.key)); const _nCont=_invAll.filter(p=>COUNTED[p.key]).length;
+  const rows=sortRows(_invAll.filter(p=>(!INVNEG||p.bodega<0||p.full<0||p.total<0)&&(!INVNOFOTO||!FOTOS[p.key])&&(!INVUBIC||(INVUBIC==='bodega'?p.bodega>0:(p.full>0||p.camino>0)))&&(!INVPEND||!COUNTED[p.key])&&(!INVSOLOACT||!_pubAct||_actSkus.has(p.key))&&(!_q||norm((p.nombre||'')+' '+(p.key||'')).includes(_q))), INVSORT.key, INVSORT.dir);
   $('invBody').innerHTML=rows.map(p=>{
     if(INVEDIT===p.key){ const ov=OVERRIDES[p.key]||{}; const cv=(ov.costo!=null&&ov.costo!=='')?ov.costo:(p.costo?round2(p.costo):'');
       return `<tr class="editing"><td colspan="10"><div class="row" style="gap:8px;align-items:flex-end;padding:4px 0">
@@ -809,15 +812,18 @@ function renderInventario(){
         <button class="btn ghost sm" id="ieCancel">Cancelar</button>
         <button class="btn ghost sm invHide" data-key="${encodeURIComponent(p.key)}" style="color:#c0392b">🗑️ Quitar del ERP</button>
       </div><small style="color:var(--muted)">SKU <b>${escapeHtml(p.key)}</b> · cámbialo (se actualiza en TODO el ERP), corrige el nombre, enlaza la publicación o ajusta el costo. “Quitar” lo esconde (lo restauras más abajo).</small></td></tr>`; }
-    return `<tr><td style="text-align:center"><input type="checkbox" class="invChk" data-key="${encodeURIComponent(p.key)}"${SELSKU.has(p.key)?' checked':''}></td>${prodCell(p)}
+    return `<tr${COUNTED[p.key]?' style="background:var(--good-bg,#eaf7ef)"':''}><td style="text-align:center"><input type="checkbox" class="invChk" data-key="${encodeURIComponent(p.key)}"${SELSKU.has(p.key)?' checked':''}></td>${prodCell(p)}
       <td class="${p.bodega<0?'m-bad':''}">${num.format(p.bodega)}</td><td class="${p.full<0?'m-bad':''}">${num.format(p.full)}</td><td>${p.camino?num.format(p.camino):'—'}</td>
       <td><b>${num.format(p.total)}</b></td><td>${p.velDia>0?covTxt(p.covTotal)+' d':'—'}</td>
       <td>${p.esKit?`<span title="Costo calculado con sus piezas en 🧩 Kits / Recetas" style="cursor:help;white-space:nowrap">${mxn2.format(p.costo)} <span style="font-size:10px;background:var(--accent,#e4846d);color:#fff;padding:1px 5px;border-radius:6px">🧩 kit</span></span>`:`<input type="number" class="invCostEdit" data-key="${encodeURIComponent(p.key)}" value="${p.costo?round2(p.costo):''}" placeholder="?" min="0" step="0.01" style="width:78px">`}</td><td>${mxn.format(p.valorInv)}</td>
-      <td style="white-space:nowrap"><button class="btn ghost sm invFoto" data-key="${encodeURIComponent(p.key)}" title="${FOTOS[p.key]?'Cambiar foto':'Agregar foto'}"${FOTOS[p.key]?'':' style="background:var(--blush,#f3e3da)"'}>📷</button> <button class="btn ghost sm invDiag" data-key="${encodeURIComponent(p.key)}" title="Ver de dónde sale el saldo">🔍</button> <button class="btn ghost sm invEdit" data-key="${encodeURIComponent(p.key)}" title="Editar nombre, publicación y costo">✏️</button> <button class="btn ghost sm invHide" data-key="${encodeURIComponent(p.key)}" title="Quitar del ERP">🗑️</button></td></tr>`+(DIAGSKU===p.key?diagRow(p):'');
+      <td style="white-space:nowrap"><button class="btn ghost sm invCount" data-key="${encodeURIComponent(p.key)}" title="${COUNTED[p.key]?'Ya lo contaste (clic para desmarcar)':'Marcar como contado en tu bodega'}">${COUNTED[p.key]?'✅':'⬜'}</button> <button class="btn ghost sm invFoto" data-key="${encodeURIComponent(p.key)}" title="${FOTOS[p.key]?'Cambiar foto':'Agregar foto'}"${FOTOS[p.key]?'':' style="background:var(--blush,#f3e3da)"'}>📷</button> <button class="btn ghost sm invDiag" data-key="${encodeURIComponent(p.key)}" title="Ver de dónde sale el saldo">🔍</button> <button class="btn ghost sm invEdit" data-key="${encodeURIComponent(p.key)}" title="Editar nombre, publicación y costo">✏️</button> <button class="btn ghost sm invHide" data-key="${encodeURIComponent(p.key)}" title="Quitar del ERP">🗑️</button></td></tr>`+(DIAGSKU===p.key?diagRow(p):'');
   }).join('')||`<tr><td colspan="10" class="empty">Sube tu reporte de Full y tu hoja de inventario.</td></tr>`;
   updateSelBar();
+  const ab=$('invActBtn'); if(ab) ab.textContent=INVSOLOACT?'👁️ Ver todos':'🔕 Solo activos';
+  const cb=$('invCountBtn'); if(cb) cb.textContent=INVPEND?'📋 Ver todos':'📋 Por contar';
   const tBod=rows.reduce((a,p)=>a+Math.max(0,p.bodega)*p.costo,0), tFull=rows.reduce((a,p)=>a+(p.full+p.camino)*p.costo,0);
-  $('invFoot').innerHTML=rows.length?`Valor en bodega: <b>${mxn.format(tBod)}</b> · valor en Full: <b>${mxn.format(tFull)}</b> · total: <b>${mxn.format(tBod+tFull)}</b>.`:'';
+  const contTxt=_invAll.length?` · ✅ contados <b>${_nCont}</b> de <b>${_invAll.length}</b>`+(_nCont?` <a href="javascript:void(0)" id="invCountReset" style="color:var(--accent-d)">reiniciar conteo</a>`:''):'';
+  $('invFoot').innerHTML=rows.length?`Valor en bodega: <b>${mxn.format(tBod)}</b> · valor en Full: <b>${mxn.format(tFull)}</b> · total: <b>${mxn.format(tBod+tFull)}</b>${contTxt}.`:'';
 }
 
 function renderOcultos(){ const v=$('ocultosBox'); if(!v) return; const hid=[...HIDDEN]; if(!hid.length){ v.innerHTML=''; return; }
@@ -1036,7 +1042,7 @@ $('provExport').onclick=()=>dl('pedido-proveedor.csv',['SKU','Producto','Vendido
 $('invExport').onclick=()=>dl('inventario.csv',['SKU','Producto','Bodega','Full','EnCamino','Total','CostoU','Valor'],COMPUTED.filter(p=>p.inv).sort((a,b)=>b.valorInv-a.valorInv).map(p=>[p.key,p.nombre,p.bodega,p.full,p.camino,p.total,round2(p.costo),round2(p.valorInv)]));
 
 /* ---------- respaldo / portabilidad ---------- */
-const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS];
+const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED];
 function hacerBackup(){ const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
   const blob=new Blob([JSON.stringify({app:'wedding-shop-erp',v:3,fecha:hoy(),data})],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='wedding-erp-respaldo-'+hoy()+'.json'; a.click();
@@ -1074,6 +1080,8 @@ $('invSearch').addEventListener('input',e=>{ INVSEARCH=e.target.value; renderInv
 if($('invNegBtn')) $('invNegBtn').addEventListener('click',()=>{ INVNEG=!INVNEG; renderInventario(); });
 if($('btnFotos')) $('btnFotos').addEventListener('click',importarFotos);
 if($('invNoFotoBtn')) $('invNoFotoBtn').addEventListener('click',()=>{ INVNOFOTO=!INVNOFOTO; renderInventario(); });
+if($('invActBtn')) $('invActBtn').addEventListener('click',()=>{ INVSOLOACT=!INVSOLOACT; saveJSON('ml_invact_v3',INVSOLOACT); renderInventario(); });
+if($('invCountBtn')) $('invCountBtn').addEventListener('click',()=>{ INVPEND=!INVPEND; renderInventario(); });
 if($('fotoUpload')) $('fotoUpload').addEventListener('change',e=>{ const f=e.target.files[0]; if(f){ if(FOTOMODE==='bulk') uploadFotoBulk(f); else uploadFotoManual(f); } e.target.value=''; });
 $('reabSearch').addEventListener('input',e=>{ REABSEARCH=e.target.value; renderReabasto(); });
 function copyText(t){ try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t); return true; } }catch(e){}
@@ -1335,7 +1343,9 @@ $('view-recetas').addEventListener('click',e=>{
 $('view-recetas').addEventListener('change',e=>{ const t=e.target; if(t.classList&&t.classList.contains('recCompQtyEdit')){ const i=+t.dataset.i; if(RECBUILD[i]){ RECBUILD[i].qty=Math.max(1,parseNum(t.value)||1); renderRecetas(); } } });
 $('view-inventario').addEventListener('click',e=>{
   const kc=e.target.closest('.kpi[data-ubic]'); if(kc){ INVUBIC=(INVUBIC===kc.dataset.ubic?'':kc.dataset.ubic); renderInventario(); return; }
+  if(e.target.id==='invCountReset'){ if(confirm('¿Reiniciar el conteo? Se desmarcan todos los ✅ (no toca tu inventario ni tus datos).')){ COUNTED={}; saveJSON(LS_COUNTED,COUNTED); renderInventario(); } return; }
   const b=e.target.closest('button'); if(!b) return;
+  if(b.classList.contains('invCount')){ const k=decodeURIComponent(b.dataset.key); if(COUNTED[k]) delete COUNTED[k]; else COUNTED[k]=1; saveJSON(LS_COUNTED,COUNTED); renderInventario(); return; }
   if(b.classList.contains('invFoto')){ FOTOMODE='single'; FOTOSEL=decodeURIComponent(b.dataset.key); const fu=$('fotoUpload'); if(fu){ fu.value=''; fu.click(); } return; }
   if(b.id==='btnFotoBulk'){ if(!SELSKU.size){ alert('Primero marca las casillas de los productos (o usa la casilla del encabezado para marcar todos los de la lista).'); return; } FOTOMODE='bulk'; const fu=$('fotoUpload'); if(fu){ fu.value=''; fu.click(); } return; }
   if(b.id==='btnSelClear'){ SELSKU.clear(); renderInventario(); return; }
