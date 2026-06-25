@@ -192,9 +192,11 @@
     <div class="mtab" data-tab="inventario">📦 Inventario</div>
     <div class="mtab" data-tab="recetas">🧩 Kits / Recetas</div>
     <div class="mtab" data-tab="movim">📒 Movimientos</div>
+    <div class="mtab" data-tab="devol">↩️ Devoluciones</div>
   </div>
 
   <div class="view hide" id="view-resumen"></div>
+  <div class="view hide" id="view-devol"></div>
 
   <div class="view hide" id="view-rentab">
     <div class="tbar">
@@ -259,7 +261,7 @@
 
 <script>
 "use strict";
-const LS_OVR="ml_ovr_v3", LS_CFG="ml_cfg_v3", LS_FULL="ml_full_v3", LS_CAM="ml_cam_v3", LS_COST="ml_cost_v3", LS_BOD="ml_bod_v3", LS_FNAME="ml_fname_v3", LS_INAME="ml_iname_v3", LS_PUB="ml_pub_v3", LS_MOVS="ml_movs_v3", LS_APPLIED="ml_applied_v3", LS_PRODS="ml_prods_v3", LS_MAP="ml_map_v3", LS_MODE="ml_mode_v3", LS_RECETA="ml_receta_v3", LS_PUBNAME="ml_pubname_v3", LS_PUBINDEX="ml_pubindex_v3", LS_LINES="ml_lines_v3", LS_RECTS="ml_rects_v3", LS_HIDDEN="ml_hidden_v3", LS_SALES="ml_sales_v3", LS_SALEFILTER="ml_salefilter_v3", LS_INVCORTE="ml_invcorte_v3", LS_GASTOSMES="ml_gastosmes_v3", LS_REABRANGE="ml_reabrange_v3", LS_FOTOS="ml_fotos_v3", LS_COUNTED="ml_counted_v3";
+const LS_OVR="ml_ovr_v3", LS_CFG="ml_cfg_v3", LS_FULL="ml_full_v3", LS_CAM="ml_cam_v3", LS_COST="ml_cost_v3", LS_BOD="ml_bod_v3", LS_FNAME="ml_fname_v3", LS_INAME="ml_iname_v3", LS_PUB="ml_pub_v3", LS_MOVS="ml_movs_v3", LS_APPLIED="ml_applied_v3", LS_PRODS="ml_prods_v3", LS_MAP="ml_map_v3", LS_MODE="ml_mode_v3", LS_RECETA="ml_receta_v3", LS_PUBNAME="ml_pubname_v3", LS_PUBINDEX="ml_pubindex_v3", LS_LINES="ml_lines_v3", LS_RECTS="ml_rects_v3", LS_HIDDEN="ml_hidden_v3", LS_SALES="ml_sales_v3", LS_SALEFILTER="ml_salefilter_v3", LS_INVCORTE="ml_invcorte_v3", LS_GASTOSMES="ml_gastosmes_v3", LS_REABRANGE="ml_reabrange_v3", LS_FOTOS="ml_fotos_v3", LS_COUNTED="ml_counted_v3", LS_DEVOL="ml_devol_v3";
 let RAW=null, MAPPING={}, PRODUCTS=[], COMPUTED=[];
 let OVERRIDES=loadJSON(LS_OVR,{});
 let FULL=loadJSON(LS_FULL,{}), CAMINO=loadJSON(LS_CAM,{}), COST=loadJSON(LS_COST,{}), BODEGA=loadJSON(LS_BOD,{});
@@ -269,6 +271,7 @@ let MOVS=loadJSON(LS_MOVS,[]), APPLIED=loadJSON(LS_APPLIED,{}), LIVE={bodega:{},
 let RECETAS=loadJSON(LS_RECETA,{}), RECPUB="", RECVAR="", RECBUILD=[], RECCOMPSEL=null;
 let RECTS=loadJSON(LS_RECTS,{}), HIDDEN=new Set(loadJSON(LS_HIDDEN,[])), INVEDIT="";
 let SALES=loadJSON(LS_SALES,[]), SALEFILTER=loadJSON(LS_SALEFILTER,null), INVCORTE=loadJSON(LS_INVCORTE,'');
+let DEVOL=loadJSON(LS_DEVOL,[]);   // devoluciones/cancelaciones detectadas al subir ventas
 let GASTOSMES=loadJSON(LS_GASTOSMES,{}), GMSEL="";
 let REABINFO={win:30,from:'',to:''};   // ventana usada para el reabasto (info para mostrar)
 let REABRANGE=loadJSON(LS_REABRANGE,null);   // rango de fechas manual del reabasto (si lo fija desde la pestaña); null = últimos N días
@@ -428,10 +431,15 @@ function ingestSales(){ if(!RAW||!RAW.rows) return 0; const m=MAPPING; const skC
   const fechaCol=guess(RAW.headers,['fecha de venta','fecha venta','fecha']);
   const formaCol=guess(RAW.headers,['forma de entrega','tipo de entrega','método de envío','metodo de envio','logística','logistica']);
   const seen=new Set(SALES.map(s=>s.k)); const cancelVids=new Set(); let add=0;
+  const seenD=new Set(DEVOL.map(d=>d.k));
   for(const r of RAW.rows){ const key=(m.clave?r[m.clave]:'')||(m.nombre?r[m.nombre]:'')||''; if(!key) continue;
     const est=(estadoCol?(r[estadoCol]||''):'').toLowerCase(), anul=anulCol?parseNum(r[anulCol]):0;
     const vid=ventaCol?(''+(r[ventaCol]||'')).trim():'';
-    if(/cancel|devoluci|devuelt|reembols/.test(est)||anul!==0){ if(vid) cancelVids.add(vid); continue; }
+    if(/cancel|devoluci|devuelt|reembols/.test(est)||anul!==0){ if(vid) cancelVids.add(vid);
+      const du=m.unidades?parseNum(r[m.unidades]):0, dk='D|'+vid+'|'+key+'|'+du+'|'+(anul||0);
+      if(!seenD.has(dk)){ seenD.add(dk); const tipo=/devoluci|devuelt/.test(est)?'devolución':'cancelación';
+        DEVOL.push({k:dk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, nom:(m.nombre?r[m.nombre]:'')||key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), u:du, anul:Math.abs(anul||0), est:(estadoCol?(''+(r[estadoCol]||'')).trim():''), tipo}); }
+      continue; }
     const u=m.unidades?parseNum(r[m.unidades]):0; if(u<=0) continue;
     const kk='V|'+vid+'|'+key+'|'+u; if(seen.has(kk)) continue; seen.add(kk);
     const pre=m.precio?parseNum(r[m.precio]):0, ing=m.ingreso?parseNum(r[m.ingreso]):(pre*u);
@@ -439,7 +447,7 @@ function ingestSales(){ if(!RAW||!RAW.rows) return 0; const m=MAPPING; const skC
     SALES.push({k:kk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), nom:(m.nombre?r[m.nombre]:'')||key, ubic:forma.includes('full')?'full':'bodega', u, ing, neto:m.neto?parseNum(r[m.neto]):0, com:m.comision?Math.abs(parseNum(r[m.comision])):0, env:m.envio?Math.abs(parseNum(r[m.envio])):0, pre, costo:(m.costo&&r[m.costo]!==''&&r[m.costo]!=null)?parseNum(r[m.costo]):null, stock:(m.stock&&r[m.stock]!==''&&r[m.stock]!=null)?parseNum(r[m.stock]):null});
     add++; }
   let quit=0; if(cancelVids.size){ const b=SALES.length; SALES=SALES.filter(s=>!cancelVids.has(s.vid)); quit=b-SALES.length; }
-  saveJSON(LS_SALES,SALES); return {add,quit:typeof quit==='number'?quit:0,cancel:cancelVids.size}; }
+  saveJSON(LS_SALES,SALES); saveJSON(LS_DEVOL,DEVOL); return {add,quit:typeof quit==='number'?quit:0,cancel:cancelVids.size}; }
 function migrateSku(oldK,newK){ oldK=(''+oldK).trim(); newK=(''+newK).trim(); if(!oldK||!newK||oldK===newK) return false;
   const ren=o=>{ if(o&&Object.prototype.hasOwnProperty.call(o,oldK)){ if(!(newK in o)) o[newK]=o[oldK]; delete o[oldK]; } };
   [BODEGA,FULL,CAMINO,COST,FULLNAME,INVNAME,PUBID,PUBNAME,OVERRIDES].forEach(ren);
@@ -628,6 +636,27 @@ function gastosMesCard(){
     '<div id="gmList">'+(rows||'<p class="hint">Sin gastos capturados en '+sel+'. Agrega lo que te cobraron este mes 👇</p>')+'</div>'+
     '<div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><button class="btn ghost sm" id="gmAdd">➕ Agregar gasto</button><span class="hint">📦 Insumos: <b>'+mxn.format(insT)+'</b> · 🏢 Fijos: <b>'+mxn.format(fijT)+'</b> · Total '+sel+': <b>'+mxn.format(tot)+'</b></span></div>'+
     '<p class="hint" style="margin-top:6px">Se restan de tu ganancia para darte la <b>Ganancia NETA del negocio</b> (arriba). Captura cada mes lo que realmente te cobraron.</p></div>';
+}
+function renderDevol(){ const v=$('view-devol'); if(!v) return;
+  if(!DEVOL.length){ v.innerHTML='<div class="card"><h3 class="vh">↩️ Devoluciones y cancelaciones</h3><p class="hint">Aún no hay nada registrado. Cuando subas tus Excel de ventas, detecto automáticamente las ventas <b>canceladas</b> y <b>devueltas</b>, y aquí verás de qué productos son y cuánto te costaron.<br><br><b>Tip:</b> vuelve a subir tus Excel de ventas (incluso los de meses pasados) para juntar el historial — solo se suman las devoluciones, no toca el resto.</p></div>'; return; }
+  const byP={}; let nDev=0,nCan=0,udsT=0,refT=0;
+  for(const d of DEVOL){ const o=byP[d.sku]||(byP[d.sku]={sku:d.sku,nom:d.nom||nombreDe(d.sku),dev:0,can:0,u:0,anul:0});
+    if(d.tipo==='devolución'){o.dev++;nDev++;} else {o.can++;nCan++;}
+    const du=parseNum(d.u)||0, an=parseNum(d.anul)||0; o.u+=du; o.anul+=an; udsT+=du; refT+=an; }
+  const rows=Object.values(byP).sort((a,b)=>(b.dev+b.can)-(a.dev+a.can));
+  const ventasUds=SALES.reduce((a,s)=>a+(parseNum(s.u)||0),0);
+  const pct=(ventasUds+udsT)>0?(udsT/(ventasUds+udsT)*100):0;
+  const kpis=[
+    {l:'↩️ Devoluciones',v:num.format(nDev),s:'productos devueltos'},
+    {l:'🚫 Cancelaciones',v:num.format(nCan),s:'ventas canceladas'},
+    {l:'💸 Reembolsado',v:mxn.format(refT),c:'warn',s:'dinero que regresó al cliente'},
+    {l:'📉 % devuelto/cancelado',v:pct.toFixed(1)+'%',c:pct>=5?'bad':'good',s:num.format(udsT)+' de '+num.format(ventasUds+udsT)+' uds'}
+  ];
+  v.innerHTML='<div class="kpis">'+kpis.map(k=>`<div class="kpi ${k.c||''}"><div class="lbl">${k.l}</div><div class="val">${k.v}</div><div class="sub">${k.s||''}</div></div>`).join('')+'</div>'+
+    '<div class="card"><h3 class="vh">📦 Por producto <span style="font-weight:400;color:var(--muted);font-size:12px">— cuáles te devuelven o cancelan más</span></h3><div class="tablewrap" style="max-height:48vh"><table><thead><tr><th>Producto</th><th>SKU</th><th>↩️ Devol.</th><th>🚫 Cancel.</th><th>Uds</th><th>Reembolsado</th></tr></thead><tbody>'+
+      rows.map(p=>'<tr><td class="prod" style="max-width:260px">'+fotoThumb(p.sku)+escapeHtml(p.nom)+'</td><td>'+escapeHtml(p.sku)+'</td><td>'+(p.dev||'—')+'</td><td>'+(p.can||'—')+'</td><td>'+num.format(p.u)+'</td><td>'+(p.anul>0?mxn.format(p.anul):'—')+'</td></tr>').join('')+'</tbody></table></div></div>'+
+    '<div class="card"><h3 class="vh">🧾 Detalle <span style="font-weight:400;color:var(--muted);font-size:12px">— lo más reciente</span></h3><div class="tablewrap" style="max-height:42vh"><table><thead><tr><th>Fecha</th><th># de venta</th><th>Producto</th><th>Tipo</th><th>Uds</th><th>$</th></tr></thead><tbody>'+
+      DEVOL.slice().sort((a,b)=>(''+(b.f||'')).localeCompare(''+(a.f||''))).slice(0,200).map(d=>'<tr><td style="white-space:nowrap">'+escapeHtml(fechaCorta(d.f)||d.f||'—')+'</td><td>'+escapeHtml(d.vid||'—')+'</td><td class="prod" style="max-width:300px">'+escapeHtml(d.nom||d.sku)+'</td><td style="white-space:nowrap">'+(d.tipo==='devolución'?'↩️ devolución':'🚫 cancelación')+'</td><td>'+num.format(d.u)+'</td><td>'+(parseNum(d.anul)>0?mxn.format(d.anul):'—')+'</td></tr>').join('')+'</tbody></table></div>'+(DEVOL.length>200?'<p class="hint">Mostrando 200 de '+DEVOL.length+'.</p>':'')+'</div>';
 }
 function monthlyStats(){
   const comPct=parseNum($('comPct').value), comFija=parseNum($('comFija').value), envioU=parseNum($('envio').value), empaqueU=parseNum($('empaqueU').value)||0;
@@ -954,7 +983,7 @@ function renderConciliacion(){ const v=$('concBox'); if(!v) return;
    '<div class="card"><h3 class="vh">🏷️ Publicado pero SIN stock en bodega</h3>'+
      (sinBod.length?'<div class="tablewrap" style="max-height:36vh"><table><thead><tr><th>Producto</th><th>SKU</th></tr></thead><tbody>'+
        sinBod.slice(0,300).map(x=>'<tr><td class="prod" style="max-width:380px">'+escapeHtml(x.nombre)+'</td><td>'+escapeHtml(x.sku)+'</td></tr>').join('')+'</tbody></table></div>'+(sinBod.length>300?'<p class="hint">Mostrando 300 de '+sinBod.length+'.</p>':''):'<p class="hint">🎉 Todo lo publicado tiene stock.</p>')+'</div>'; }
-function refresh(){ recomputeLive(); ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); }
+function refresh(){ recomputeLive(); ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); renderDevol(); }
 function showTab(name){ TAB=name; document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hide',v.id!=='view-'+name)); }
 
 /* ---------- carga ventas ---------- */
@@ -987,10 +1016,16 @@ $('fullFile').addEventListener('change',async e=>{ const f=e.target.files[0]; if
     $('fullMapFields').querySelectorAll('select').forEach(s=>s.onchange=()=>FULLMAP[s.dataset.k]=s.value);
     $('fullMapBox').classList.remove('hide'); $('fullMsg').textContent='Leí '+t.rows.length+' filas. Confirma y cruza.';
   }catch(err){ $('fullMsg').textContent=''; alert('No pude leer el reporte de Full: '+err.message); } });
+/* factor de PAQUETE: si esa publicación es un pack del MISMO SKU (receta = sku × N), 1 unidad en Full = N piezas */
+function fullFactor(pubRaw,sku){ if(!pubRaw) return 1; const d=(''+pubRaw).replace(/\D/g,''); if(!d) return 1;
+  for(const key in RECETAS){ const kd=(''+key).split('|')[0].replace(/\D/g,''); if(kd&&kd===d){ const it=(RECETAS[key]||[]).find(x=>x.sku===sku); if(it&&(parseNum(it.qty)||0)>1) return parseNum(it.qty); } }
+  return 1; }
 function applyFullFile(){ if(!RAWFULL||!FULLMAP.sku||!FULLMAP.full){alert('Elige SKU y la columna de stock en Full.');return;}
   FULL={}; CAMINO={}; const fNameCol=guess(RAWFULL.headers,['producto','título de la publicaci','titulo','título','descripci']);
   const fPubCol=guessEx(RAWFULL.headers,['# publicaci','número de publicaci','numero de publicaci','publicaci'],['título','titulo','estado','canal','tipo']);
-  for(const r of RAWFULL.rows){ const sku=(r[FULLMAP.sku]||'').trim(); if(!sku) continue; FULL[sku]=parseNum(r[FULLMAP.full]); if(FULLMAP.camino) CAMINO[sku]=parseNum(r[FULLMAP.camino]); if(fNameCol&&r[fNameCol]) FULLNAME[sku]=r[fNameCol]; if(fPubCol&&!PUBID[sku]){ const id=(r[fPubCol]||'').replace(/\D/g,''); if(id) PUBID[sku]=id; } }
+  for(const r of RAWFULL.rows){ const sku=(r[FULLMAP.sku]||'').trim(); if(!sku) continue; const _ff=fPubCol?fullFactor(r[fPubCol],sku):1;
+    FULL[sku]=(FULL[sku]||0)+parseNum(r[FULLMAP.full])*_ff; if(FULLMAP.camino) CAMINO[sku]=(CAMINO[sku]||0)+parseNum(r[FULLMAP.camino])*_ff;
+    if(fNameCol&&r[fNameCol]) FULLNAME[sku]=r[fNameCol]; if(fPubCol&&!PUBID[sku]){ const id=(r[fPubCol]||'').replace(/\D/g,''); if(id) PUBID[sku]=id; } }
   saveJSON(LS_FULL,FULL); saveJSON(LS_CAM,CAMINO); saveJSON(LS_FNAME,FULLNAME); saveJSON(LS_PUB,PUBID);
   aggregate();  // re-arma productos para incluir los SKUs que están en Full aunque no vendieron
   $('fullMsg').textContent='✓ Apliqué tu stock de Full ('+Object.keys(FULL).length+' SKUs).'; refresh(); }
@@ -1042,7 +1077,7 @@ $('provExport').onclick=()=>dl('pedido-proveedor.csv',['SKU','Producto','Vendido
 $('invExport').onclick=()=>dl('inventario.csv',['SKU','Producto','Bodega','Full','EnCamino','Total','CostoU','Valor'],COMPUTED.filter(p=>p.inv).sort((a,b)=>b.valorInv-a.valorInv).map(p=>[p.key,p.nombre,p.bodega,p.full,p.camino,p.total,round2(p.costo),round2(p.valorInv)]));
 
 /* ---------- respaldo / portabilidad ---------- */
-const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED];
+const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED,LS_DEVOL];
 function hacerBackup(){ const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
   const blob=new Blob([JSON.stringify({app:'wedding-shop-erp',v:3,fecha:hoy(),data})],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='wedding-erp-respaldo-'+hoy()+'.json'; a.click();
