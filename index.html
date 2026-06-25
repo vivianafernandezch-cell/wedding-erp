@@ -676,9 +676,11 @@ function mesChartCard(){
   const MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
   const lbl=m=>{ const p=(''+m).split('-'); return (MES[(+p[1])-1]||'')+" '"+(p[0]||'').slice(2); };
   const fmtK=v=>{ v=Math.round(v); return Math.abs(v)>=1000?('$'+num.format(Math.round(v/1000))+'k'):('$'+num.format(v)); };
-  const W=Math.max(560, data.length*88), H=300, padT=26, padB=48, padX=10;
+  const W=Math.max(560, data.length*88), H=300, padT=38, padB=48, padX=10;
   const chartH=H-padT-padB, chartW=W-padX*2;
   const maxV=Math.max(1, ...data.map(d=>Math.max(d.ing, d.gan, 0)));
+  let bi=0,wi=0; data.forEach((d,i)=>{ if(d.ing>data[bi].ing) bi=i; if(d.ing<data[wi].ing) wi=i; });
+  let trendTxt=''; if(data.length>=2){ const pa=data[data.length-2].ing, pb=data[data.length-1].ing; if(pa>0){ const ch=(pb-pa)/pa*100, up=ch>=0; trendTxt=' &nbsp;·&nbsp; Último mes: <b style="color:'+(up?'#2e8b57':'#c0392b')+'">'+(up?'▲ subió ':'▼ bajó ')+Math.abs(ch).toFixed(0)+'%</b> vs el anterior'; } }
   const gW=chartW/data.length, bW=Math.min(28, gW/2-5);
   let s='<line x1="'+padX+'" y1="'+(padT+chartH)+'" x2="'+(W-padX)+'" y2="'+(padT+chartH)+'" stroke="#e7ddd7"/>';
   data.forEach((d,i)=>{ const cx=padX+i*gW+gW/2, xi=cx-bW-1, xg=cx+1;
@@ -686,10 +688,13 @@ function mesChartCard(){
     s+='<rect x="'+xi.toFixed(1)+'" y="'+(padT+chartH-hi).toFixed(1)+'" width="'+bW+'" height="'+hi.toFixed(1)+'" rx="3" fill="#e4846d"/>';
     s+='<rect x="'+xg.toFixed(1)+'" y="'+(padT+chartH-hg).toFixed(1)+'" width="'+bW+'" height="'+hg.toFixed(1)+'" rx="3" fill="#3aa76d"/>';
     s+='<text x="'+(xi+bW/2).toFixed(1)+'" y="'+(padT+chartH-hi-5).toFixed(1)+'" text-anchor="middle" font-size="10" fill="#b95f43">'+fmtK(d.ing)+'</text>';
+    if(i===bi) s+='<text x="'+(xi+bW/2).toFixed(1)+'" y="'+(padT+chartH-hi-17).toFixed(1)+'" text-anchor="middle" font-size="13">🏆</text>';
+    if(i===wi&&bi!==wi) s+='<text x="'+(xi+bW/2).toFixed(1)+'" y="'+(padT+chartH-hi-17).toFixed(1)+'" text-anchor="middle" font-size="12">🔻</text>';
     s+='<text x="'+cx.toFixed(1)+'" y="'+(H-padB+17)+'" text-anchor="middle" font-size="11.5" fill="#6a5a52">'+lbl(d.mes)+'</text>';
     s+='<text x="'+cx.toFixed(1)+'" y="'+(H-padB+32)+'" text-anchor="middle" font-size="11" font-weight="700" fill="'+(d.gan>=0?'#2e8b57':'#c0392b')+'">'+(d.gan<0?'-':'')+fmtK(Math.abs(d.gan))+'</text>';
   });
-  return '<div class="card"><h3 class="vh">📈 Ventas y ganancia por mes</h3><p class="hint" style="margin:0 0 4px"><span style="color:#e4846d;font-weight:700">▮</span> Ventas (ingreso) &nbsp; <span style="color:#3aa76d;font-weight:700">▮</span> Ganancia neta &nbsp;·&nbsp; últimos '+data.length+' meses (todo tu historial cargado)</p><div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;min-width:'+Math.min(W,520)+'px">'+s+'</svg></div></div>';
+  const resumen='<p style="margin:0 0 6px;font-size:13.5px">🏆 Mejor mes: <b>'+lbl(data[bi].mes)+'</b> ('+fmtK(data[bi].ing)+')'+(bi!==wi?(' &nbsp;·&nbsp; 🔻 Más bajo: <b>'+lbl(data[wi].mes)+'</b> ('+fmtK(data[wi].ing)+')'):'')+trendTxt+'</p>';
+  return '<div class="card"><h3 class="vh">📈 Ventas y ganancia por mes</h3>'+resumen+'<p class="hint" style="margin:0 0 4px"><span style="color:#e4846d;font-weight:700">▮</span> Ventas (ingreso) &nbsp; <span style="color:#3aa76d;font-weight:700">▮</span> Ganancia neta &nbsp;·&nbsp; últimos '+data.length+' meses (todo tu historial cargado)</p><div style="overflow-x:auto"><svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;min-width:'+Math.min(W,520)+'px">'+s+'</svg></div></div>';
 }
 function renderResumen(){
   let ingreso=0,neto=0,cargos=0,gan=0,comT=0,envT=0,uds=0,anyCost=false,empaqueT=0,costoProdT=0,ventasN=0;
@@ -1257,9 +1262,12 @@ function renderHistorial(){
   const mh=$('movHead'); if(mh) mh.innerHTML=thS('Fecha','fecha',MSORT)+thS('Tipo','tipo',MSORT)+thS('Producto','nombre',MSORT)+thS('Ubic.','ubic',MSORT)+thS('Entra','entrada',MSORT)+thS('Sale','salida',MSORT)+'<th>Ref / #</th><th>Detalle</th><th></th>';
   const q=norm(MOVSEARCH);
   const det=m=>{const a=[]; if(parseNum(m.costo)>0)a.push('$'+num.format(m.costo)); if(m.prov)a.push(escapeHtml(m.prov)); if(m.nota)a.push(escapeHtml(m.nota)); return a.join(' · ');};
-  let hist=MOVS.slice();
+  let hist=MOVS.slice(); const _oi=new Map(MOVS.map((m,i)=>[m,i]));
   if(q) hist=hist.filter(m=>norm((m.fecha||'')+' '+(m.tipo||'')+' '+(m.sku||'')+' '+(m.nombre||'')+' '+(m.prov||'')+' '+(m.nota||'')+' '+(m.ubic||'')+' '+(m.ref||'')).includes(q));
-  hist = MSORT.key ? sortRows(hist, MSORT.key, MSORT.dir) : hist.reverse();
+  if(MSORT.key){ const k=MSORT.key, d=MSORT.dir;
+    hist.sort((a,b)=>{ let x=a[k],y=b[k],c; if(typeof x==='string'||typeof y==='string') c=(''+(x||'')).localeCompare(''+(y||''),'es'); else c=(parseNum(x)||0)-(parseNum(y)||0);
+      if(c) return d<0?-c:c; return (_oi.get(b)||0)-(_oi.get(a)||0); });   // empate (misma fecha) → lo capturado más reciente arriba
+  } else hist.reverse();
   mb.innerHTML=hist.slice(0,400).map(m=>'<tr><td>'+escapeHtml(m.fecha||'')+'</td><td>'+escapeHtml(m.tipo||'')+'</td>'+prodCell({key:m.sku,nombre:m.nombre||m.sku})+'<td>'+(m.ubic==='full'?'Full':'Bodega')+'</td>'+
     '<td>'+(m.entrada>0?'<input type="number" min="0" step="1" class="movQty" data-id="'+m.id+'" data-f="entrada" value="'+m.entrada+'" style="width:62px;text-align:right">':'')+'</td>'+
     '<td>'+(m.salida>0?'<input type="number" min="0" step="1" class="movQty" data-id="'+m.id+'" data-f="salida" value="'+m.salida+'" style="width:62px;text-align:right">':'')+'</td>'+
