@@ -285,7 +285,7 @@ const TN_FOTOS={"1000V":"https://dcdn-us.mitiendanube.com/stores/007/111/969/pro
 const SB_URL='https://aeyqebymbtnzwtczwabs.supabase.co';
 const SB_KEY='sb_publishable_b7Tt6IffSjZKnllb3LHjOg_stTUC8z5';
 const CLOUD_ON = !!(window.supabase && SB_URL && SB_KEY && location.protocol.indexOf('http')===0);
-let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null, _cloudStamp=localStorage.getItem('erp_cloud_stamp')||'', _cloudPulling=false, _cloudErr='';
+let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null, _cloudStamp=localStorage.getItem('erp_cloud_stamp')||'', _cloudPulling=false, _cloudErr='', _cloudRev=parseInt(localStorage.getItem('erp_cloud_rev')||'0',10);
 if(CLOUD_ON){ try{ SB=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}); }catch(e){ console.error('Supabase init:',e); } }
 let DIAGSKU="", INVNEG=false, INVNOFOTO=false, FOTOSEL="", SELSKU=new Set(), FOTOMODE='single', INVUBIC="", INVSOLOACT=loadJSON('ml_invact_v3',false), INVPEND=false, COUNTED=loadJSON(LS_COUNTED,{});
 function saveHidden(){ saveJSON(LS_HIDDEN,[...HIDDEN]); }
@@ -1033,6 +1033,19 @@ function fullFactor(pubRaw,sku){ if(!pubRaw) return 1; const d=(''+pubRaw).repla
 function packOf(sku){ if(!sku) return 1; let q=1;
   for(const key in RECETAS){ const comps=RECETAS[key]||[]; if(comps.length!==1) continue; const it=comps[0]; if(it&&it.sku===sku){ const v=parseNum(it.qty)||1; if(v>q) q=v; } }
   return q; }
+/* qué piezas mueve una fila del Envío a Full: usa el KIT (por # de publicación o por SKU), o parte un SKU compuesto "A y B" */
+function recetaForEnvio(sku,pubRaw){
+  // 1) por # de publicación (compara dígitos, igual que fullFactor; soporta varias publicaciones separadas)
+  const nums=(''+(pubRaw||'')).split(/[^\d]+/).filter(Boolean);
+  for(const pn of nums){ for(const key in RECETAS){ const kd=(''+key).split('|')[0].replace(/\D/g,''); if(kd&&kd===pn && RECETAS[key]&&RECETAS[key].length) return RECETAS[key]; } }
+  // 2) receta guardada directo en el SKU
+  if(sku && RECETAS[sku] && RECETAS[sku].length) return RECETAS[sku];
+  // 3) SKU compuesto: "22NL y 22B", "18B / 18N", "A, B"
+  const parts=(''+sku).split(/\s+y\s+|\s*\/\s*|\s*,\s*/).map(s=>s.trim()).filter(Boolean);
+  if(parts.length>1) return parts.map(s=>({sku:s,qty:1}));
+  // 4) pieza suelta
+  return [{sku:sku,qty:1}];
+}
 function applyFullFile(){ if(!RAWFULL||!FULLMAP.sku||!FULLMAP.full){alert('Elige SKU y la columna de stock en Full.');return;}
   FULL={}; CAMINO={}; const fNameCol=guess(RAWFULL.headers,['producto','título de la publicaci','titulo','título','descripci']);
   const fPubCol=guessEx(RAWFULL.headers,['# publicaci','número de publicaci','numero de publicaci','publicaci'],['título','titulo','estado','canal','tipo']);
@@ -1165,7 +1178,10 @@ function corteEfectivo(){ return INVCORTE || seedDate() || ''; }
 function syncSalesMovs(){ const hasBase=MOVS.some(m=>m.nota!=='ventas'); MOVS=MOVS.filter(m=>m.nota!=='ventas');
   if(hasBase){ const corte=corteEfectivo();
     for(const s of SALES){ if(!s.sku||s.u<=0) continue; if(corte && s.f && s.f<=corte) continue;
-      MOVS.push({id:movId(),fecha:s.f||hoy(),tipo:'Venta '+(s.ubic==='full'?'Full':'Mercado Envíos'),sku:s.sku,nombre:nombreDe(s.sku),ubic:s.ubic||'bodega',entrada:0,salida:s.u,costo:0,prov:'',nota:'ventas',pub:s.pid,ref:s.vid}); } }
+      const tipo='Venta '+(s.ubic==='full'?'Full':'Mercado Envíos'), ubic=s.ubic||'bodega';
+      const comps=recetaForEnvio(s.sku,s.pid);   // expande el kit a piezas reales (misma búsqueda robusta que el Envío a Full)
+      for(const c of comps){ const q=parseNum(c.qty)||1;
+        MOVS.push({id:movId(),fecha:s.f||hoy(),tipo:tipo,sku:c.sku,nombre:nombreDe(c.sku),ubic:ubic,entrada:0,salida:s.u*q,costo:0,prov:'',nota:'ventas',pub:s.pid,ref:s.vid}); } } }
   saveMovs(); }
 function generateSalesMovements(){ syncSalesMovs(); recomputeLive(); }
 function markSalesApplied(){ }
@@ -1192,16 +1208,19 @@ function addMovManual(){
 }
 function aplicarEnvioFull(){
   if(!RAWE2F||!E2FMAP.sku||!E2FMAP.cant) return alert('Elige las columnas de SKU y cantidad.');
-  let n=0,totFull=0,totBod=0,mult=0,replaced=0; const refTxt=E2FID?('envío #'+E2FID):'envío';
+  const pubCol=guessEx(RAWE2F.headers,['número de publicación','numero de publicacion','# publicaci','no. publicaci','publicaci'],['título','titulo','estado','variante','universal','código ml','codigo ml']);
+  let n=0,tot=0,mult=0,replaced=0; const refTxt=E2FID?('envío #'+E2FID):'envío';
   if(E2FID){ for(let i=MOVS.length-1;i>=0;i--){ if(MOVS[i].tipo==='Envío a Full' && MOVS[i].ref===E2FID){ MOVS.splice(i,1); replaced++; } } }  // re-importar el MISMO envío reemplaza el anterior (no duplica)
   for(const r of RAWE2F.rows){ const sku=(r[E2FMAP.sku]||'').trim(); const apt=parseNum(r[E2FMAP.cant]); if(!sku||apt<=0) continue;
-    const pk=packOf(sku), piezas=apt*pk; if(pk>1) mult++;
-    addMov({tipo:'Envío a Full',sku:sku,ubic:'bodega',salida:piezas,nota:refTxt+(pk>1?(' · '+apt+'×'+pk+' pzas/paquete'):''),ref:E2FID});
-    addMov({tipo:'Envío a Full',sku:sku,ubic:'full',entrada:apt,nota:refTxt,ref:E2FID});
-    n++; totFull+=apt; totBod+=piezas; }
+    const comps=recetaForEnvio(sku, pubCol?r[pubCol]:''); const esKit=comps.length>1 || comps[0].sku!==sku || (parseNum(comps[0].qty)||1)>1; if(esKit) mult++;
+    for(const c of comps){ const q=parseNum(c.qty)||1, piezas=apt*q;
+      addMov({tipo:'Envío a Full',sku:c.sku,ubic:'bodega',salida:piezas,nota:refTxt+(esKit?(' · '+sku+' ×'+q):''),ref:E2FID});
+      addMov({tipo:'Envío a Full',sku:c.sku,ubic:'full',entrada:piezas,nota:refTxt+(esKit?(' · de '+sku):''),ref:E2FID});
+      tot+=piezas; }
+    n++; }
   if(!n) return alert('No encontré filas con unidades aptas para vender > 0.\n(Las filas en 0 no mueven nada — eso es correcto.)');
   saveMovs(); recomputeLive(); RAWE2F=null; const eid=E2FID; E2FID=''; afterMov();
-  alert('✅ Registré '+(eid?('el envío #'+eid):'el envío')+' a Full:\n• '+n+' productos\n• Full +'+num.format(totFull)+' unidades para vender (igual que en ML)\n• Bodega −'+num.format(totBod)+' piezas'+(mult?('\n• En '+mult+' producto(s) que son paquete/kit multipliqué por el tamaño del paquete para descontar bien las piezas de tu bodega.'):'')+(replaced?('\n• 🔁 Reemplacé '+replaced+' movimientos de una importación anterior de este mismo envío (no se duplicó).'):'')+'\n\nLas filas con 0 aptas para vender no movieron nada.');
+  alert('✅ Registré '+(eid?('el envío #'+eid):'el envío')+' a Full:\n• '+n+' publicaciones\n• '+num.format(tot)+' piezas movidas (Bodega − y Full +, en piezas reales)'+(mult?('\n• '+mult+' eran kit/paquete → repartí las piezas por cada SKU (ej. 18B y 18N, o ×4).'):'')+(replaced?('\n• 🔁 Reemplacé '+replaced+' movimientos de una importación anterior de este mismo envío (no se duplicó).'):'')+'\n\nLas filas con 0 aptas para vender no movieron nada.');
 }
 function ajustarFullaML(){
   if(!Object.keys(FULL).length) return alert('Primero sube tu reporte de Full de ML (arriba, en Inventario).');
@@ -1443,30 +1462,40 @@ if($('namesFile')) $('namesFile').addEventListener('change',e=>{ const f=e.targe
 /* ====== ☁️ Nube (Supabase): funciones de guardado/carga + login por correo ====== */
 function cloudDotSet(t){ const d=$('cloudDot'); if(d) d.textContent=t; }
 function cloudQueueSave(){ if(!CLOUD_ON||!SB||!CLOUD_USER||cloudApplying) return; clearTimeout(_cloudT); cloudDotSet('☁️ guardando…'); _cloudT=setTimeout(cloudSaveNow,1200); }
+function _cloudSaveOk(rev,stamp){ _cloudErr=''; _cloudRev=rev; _cloudStamp=stamp; try{localStorage.setItem('erp_cloud_rev',''+rev);localStorage.setItem('erp_cloud_stamp',stamp);}catch(e){} cloudConflictBanner(false); cloudErrBanner(false); cloudDotSet('☁️ guardado'); setTimeout(()=>cloudDotSet('☁️ al día'),1500); }
+function _cloudSaveFail(msg){ _cloudErr=msg; cloudDotSet('⚠️ NO guarda (toca)'); console.error('cloudSave:',msg); cloudErrBanner(true); }
 async function cloudSaveNow(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return; try{
   const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
-  const stamp=new Date().toISOString();
-  const {error}=await SB.from('erp_state').upsert({user_id:CLOUD_USER.id,data,updated_at:stamp},{onConflict:'user_id'});
-  if(error){ _cloudErr=error.message||(error.code?('código '+error.code):JSON.stringify(error)); cloudDotSet('⚠️ NO guarda (toca)'); console.error('cloudSave:',error); cloudErrBanner(true); }
-  else { _cloudErr=''; _cloudStamp=stamp; try{localStorage.setItem('erp_cloud_stamp',stamp);}catch(e){} cloudDotSet('☁️ guardado'); cloudErrBanner(false); setTimeout(()=>cloudDotSet('☁️ al día'),1500); }
-}catch(e){ _cloudErr=(e&&e.message)||(''+e); console.error(e); cloudDotSet('⚠️ sin internet (toca)'); cloudErrBanner(true); } }
+  const stamp=new Date().toISOString(), uid=CLOUD_USER.id, next=_cloudRev+1;
+  // 1) escritura CONDICIONAL: solo guardo si la nube sigue en MI versión (así no piso lo que guardó la otra compu)
+  const {data:rows,error}=await SB.from('erp_state').update({data,rev:next,updated_at:stamp}).eq('user_id',uid).eq('rev',_cloudRev).select('rev');
+  if(error){ _cloudSaveFail(error.message||(error.code?('código '+error.code):JSON.stringify(error))); return; }
+  if(rows&&rows.length){ _cloudSaveOk(rows[0].rev,stamp); return; }
+  // 2) no escribió nada: ¿la fila no existe (primera vez) o la nube avanzó?
+  const {data:cur,error:ce}=await SB.from('erp_state').select('rev').eq('user_id',uid).maybeSingle();
+  if(ce){ _cloudSaveFail(ce.message); return; }
+  if(!cur){ const {error:ie}=await SB.from('erp_state').insert({user_id:uid,data,rev:1,updated_at:stamp}); if(ie){ _cloudSaveFail(ie.message); return; } _cloudSaveOk(1,stamp); return; }
+  // 3) CONFLICTO: la otra compu guardó algo más nuevo → NO lo piso; aviso para que lo traiga
+  _cloudErr=''; cloudDotSet('⚠️ hay algo más nuevo'); cloudConflictBanner(true);
+}catch(e){ _cloudSaveFail((e&&e.message)||(''+e)); } }
 async function cloudLoad(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return false; try{
-  const {data,error}=await SB.from('erp_state').select('data,updated_at').eq('user_id',CLOUD_USER.id).maybeSingle();
+  const {data,error}=await SB.from('erp_state').select('data,updated_at,rev').eq('user_id',CLOUD_USER.id).maybeSingle();
   if(error){ console.error('cloudLoad:',error); return false; }
   if(data&&data.data&&typeof data.data==='object'&&Object.keys(data.data).length){
     cloudApplying=true; BACKUP_KEYS.forEach(k=>{ if(data.data[k]!=null) localStorage.setItem(k,data.data[k]); }); cloudApplying=false;
+    _cloudRev=(data.rev!=null?data.rev:0); try{localStorage.setItem('erp_cloud_rev',''+_cloudRev);}catch(e){}
     if(data.updated_at){ _cloudStamp=data.updated_at; try{localStorage.setItem('erp_cloud_stamp',data.updated_at);}catch(e){} }
     return true; }
   return false;
 }catch(e){ console.error(e); return false; } }
-/* trae cambios de la otra compu/cel SOLO si la nube es más nueva que lo que tengo (evita pisar datos) */
+/* trae cambios de la otra compu/cel SOLO si la nube tiene una versión MÁS NUEVA (por # de versión, a prueba de relojes) */
 async function cloudPullIfNewer(force){
   if(!CLOUD_ON||!SB||!CLOUD_USER||cloudApplying||_cloudPulling) return;
-  if(_cloudT){ if(!force) return; clearTimeout(_cloudT); await cloudSaveNow(); }   // tengo cambios sin guardar → primero los subo, no los piso
   _cloudPulling=true;
   try{
-    const {data,error}=await SB.from('erp_state').select('updated_at').eq('user_id',CLOUD_USER.id).maybeSingle();
-    if(!error && data && data.updated_at && data.updated_at>_cloudStamp){
+    const {data,error}=await SB.from('erp_state').select('rev').eq('user_id',CLOUD_USER.id).maybeSingle();
+    const cloudRev=(data&&data.rev!=null)?data.rev:-1;
+    if(!error && cloudRev>_cloudRev){
       cloudDotSet('☁️ actualizando…'); cloudSplash('Trayendo los cambios de tu otra sesión…');
       if(await cloudLoad()){ location.reload(); return; }
       const sp=$('cloudSplash'); if(sp) sp.remove();
@@ -1477,23 +1506,29 @@ async function cloudPullIfNewer(force){
 function cloudErrBanner(show){ let b=$('cloudErrBar');
   if(show){ if(!b){ b=document.createElement('div'); b.id='cloudErrBar'; b.style.cssText='position:fixed;top:48px;right:10px;z-index:901;background:#c0392b;color:#fff;border-radius:10px;padding:8px 11px;font:600 12px system-ui,sans-serif;max-width:260px;line-height:1.35;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer'; b.onclick=cloudDiag; document.body.appendChild(b); } b.textContent='⚠️ Tus cambios NO se están guardando en la nube. Toca aquí.'; }
   else if(b){ b.remove(); } }
+function cloudConflictBanner(show){ let b=$('cloudConfBar');
+  if(show){ if(!b){ b=document.createElement('div'); b.id='cloudConfBar'; b.style.cssText='position:fixed;top:48px;right:10px;z-index:901;background:#b9770e;color:#fff;border-radius:10px;padding:8px 11px;font:600 12px system-ui,sans-serif;max-width:270px;line-height:1.35;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer'; b.onclick=()=>{ if(confirm('Tu otra compu guardó algo más nuevo.\n\n¿Traer esos datos ahora? (Se reemplaza lo que ves aquí con lo de la nube.)')) cloudPullIfNewer(true); }; document.body.appendChild(b); } b.textContent='⚠️ Tu otra compu tiene cambios más nuevos. Toca para traerlos.'; }
+  else if(b){ b.remove(); } }
 async function cloudDiag(){
   if(!CLOUD_ON||!SB||!CLOUD_USER){ alert('Esta versión no está en modo nube (ábrela desde tu link en línea, con tu correo).'); return; }
   let bytes=0; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) bytes+=v.length; });
   const mb=(bytes/1048576).toFixed(2);
   cloudDotSet('☁️ probando…');
   await cloudSaveNow();                       // intenta guardar AHORA y captura el error real si lo hay
-  let cloudInfo='?';
-  try{ const {data,error}=await SB.from('erp_state').select('updated_at').eq('user_id',CLOUD_USER.id).maybeSingle();
+  let cloudInfo='?', cloudRev='?';
+  try{ const {data,error}=await SB.from('erp_state').select('updated_at,rev').eq('user_id',CLOUD_USER.id).maybeSingle();
     cloudInfo = error ? ('⚠️ ERROR al leer: '+(error.message||error.code)) : (data&&data.updated_at ? new Date(data.updated_at).toLocaleString('es-MX') : '(la nube está VACÍA)');
+    cloudRev = (data&&data.rev!=null)?data.rev:'(sin versión)';
   }catch(e){ cloudInfo='⚠️ '+(e.message||e); }
   let msg='☁️ ESTADO DE SINCRONIZACIÓN\n\n';
   msg+='Cuenta: '+((CLOUD_USER&&CLOUD_USER.email)||'?')+'\n';
   msg+='Tus datos pesan: '+mb+' MB\n';
   msg+='Movimientos: '+MOVS.length+'  ·  Ventas: '+SALES.length+'\n';
+  msg+='Versión en esta compu: '+_cloudRev+'  ·  en la nube: '+cloudRev+'\n';
   msg+='Guardado en la nube por última vez: '+cloudInfo+'\n\n';
   if(_cloudErr){ msg+='❌ NO SE PUDO GUARDAR.\nError: '+_cloudErr+'\n\n👉 Cópiale ESTE error a Claude. (Casi siempre es por permisos/RLS de la tabla erp_state.)'; }
-  else { msg+='✅ Acabo de guardar bien en la nube.\nSi tu otra compu no lo ve: ábrela y toca 🔄 (o cambia de pestaña y regresa).'; }
+  else if(cloudRev!==_cloudRev && cloudRev!=='(sin versión)' && typeof cloudRev==='number'){ msg+='⚠️ La nube tiene la versión '+cloudRev+' y aquí tienes la '+_cloudRev+'. Toca 🔄 para emparejar.'; }
+  else { msg+='✅ Estás al día y guardando bien.\nSi tu otra compu no lo ve: ábrela y toca 🔄 (o cambia de pestaña y regresa).'; }
   alert(msg);
 }
 function cloudSplash(msg){ let o=$('cloudSplash'); if(!o){ o=document.createElement('div'); o.id='cloudSplash'; o.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#e4846d,#e6bfac);color:#fff;font:600 18px system-ui,sans-serif;text-align:center;padding:24px'; document.body.appendChild(o); } o.innerHTML='<div><div style="font-size:34px;margin-bottom:10px">☁️</div>'+escapeHtml(msg)+'</div>'; }
