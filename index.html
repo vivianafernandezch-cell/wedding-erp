@@ -196,7 +196,11 @@
   </div>
 
   <div class="view hide" id="view-resumen"></div>
-  <div class="view hide" id="view-devol"></div>
+  <div class="view hide" id="view-devol">
+    <div class="tbar"><input type="text" id="devolSearch" placeholder="🔍 Buscar producto, SKU, # de venta o motivo…" style="width:320px"><button class="btn ghost sm" id="devolExport">⬇️ CSV</button></div>
+    <div id="devolKpis" class="kpis"></div>
+    <div id="devolBox"></div>
+  </div>
 
   <div class="view hide" id="view-rentab">
     <div class="tbar">
@@ -289,7 +293,7 @@ function nowTs(){ return Date.now(); }
 let RAWFULL=null, FULLMAP={sku:'',full:'',camino:''};
 let RAWINV=null, INVMAP={sku:'',cost:'',stock:'',ubi:''};
 let MODE="estimate", TAB="resumen";
-let RSORT={key:"ganTotal",dir:-1}, RSEARCH="", INVSEARCH="", REABSEARCH="", MOVSEARCH="", RENTDETAIL="";
+let RSORT={key:"ganTotal",dir:-1}, RSEARCH="", INVSEARCH="", REABSEARCH="", MOVSEARCH="", RENTDETAIL="", DEVOLSEARCH="", DEVOLSORT={key:'tot',dir:-1};
 function norm(s){ return (''+s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase(); }
 let INVSORT={key:'valorInv',dir:-1}, FSORT={key:'ganTotal',dir:-1}, PSORT={key:'ganTotal',dir:-1}, MSORT={key:'fecha',dir:-1};
 function sortRows(rows,key,dir){ if(!key) return rows; return rows.slice().sort((a,b)=>{ let x=a[key],y=b[key]; if(typeof x==='string'||typeof y==='string') return dir*(''+(x==null?'':x)).localeCompare(''+(y==null?'':y),'es',{numeric:true}); x=isFinite(+x)?+x:(dir<0?-Infinity:Infinity); y=isFinite(+y)?+y:(dir<0?-Infinity:Infinity); return dir*(x-y); }); }
@@ -427,6 +431,7 @@ function sugerirSku(){ return ''+nextProductNum(); }
 function ingestSales(){ if(!RAW||!RAW.rows) return 0; const m=MAPPING; const skCol=m.clave||m.nombre; if(!skCol) return 0;
   let pubCol=''; for(const h of RAW.headers){ for(let i=0;i<Math.min(8,RAW.rows.length);i++){ const v=(RAW.rows[i][h]||'').replace(/\s/g,''); if(/^MLM\d{6,}$/i.test(v)){ pubCol=h; break; } } if(pubCol) break; }
   const estadoCol=guess(RAW.headers,['estado']), anulCol=guess(RAW.headers,['anulaciones','anulación','anulacion','reembolso']);
+  const motivoCol=guess(RAW.headers,['motivo del resultado','motivo de la devolución','motivo de la devolucion','motivo del reclamo','motivo']), resultCol=guess(RAW.headers,['resultado']), descCol=guess(RAW.headers,['descripción del estado','descripcion del estado']);
   const ventaCol=guess(RAW.headers,['# de venta','nº de venta','numero de venta','número de venta']);
   const fechaCol=guess(RAW.headers,['fecha de venta','fecha venta','fecha']);
   const formaCol=guess(RAW.headers,['forma de entrega','tipo de entrega','método de envío','metodo de envio','logística','logistica']);
@@ -438,7 +443,8 @@ function ingestSales(){ if(!RAW||!RAW.rows) return 0; const m=MAPPING; const skC
     if(/cancel|devoluci|devuelt|reembols/.test(est)||anul!==0){ if(vid) cancelVids.add(vid);
       const du=m.unidades?parseNum(r[m.unidades]):0, dk='D|'+vid+'|'+key+'|'+du+'|'+(anul||0);
       if(!seenD.has(dk)){ seenD.add(dk); const tipo=/devoluci|devuelt/.test(est)?'devolución':'cancelación';
-        DEVOL.push({k:dk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, nom:(m.nombre?r[m.nombre]:'')||key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), u:du, anul:Math.abs(anul||0), est:(estadoCol?(''+(r[estadoCol]||'')).trim():''), tipo}); }
+        const motivo=((motivoCol&&(''+(r[motivoCol]||'')).trim())||(resultCol&&(''+(r[resultCol]||'')).trim())||(descCol&&(''+(r[descCol]||'')).trim())||'');
+        DEVOL.push({k:dk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, nom:(m.nombre?r[m.nombre]:'')||key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), u:du, anul:Math.abs(anul||0), est:(estadoCol?(''+(r[estadoCol]||'')).trim():''), motivo, tipo}); }
       continue; }
     const u=m.unidades?parseNum(r[m.unidades]):0; if(u<=0) continue;
     const kk='V|'+vid+'|'+key+'|'+u; if(seen.has(kk)) continue; seen.add(kk);
@@ -637,26 +643,24 @@ function gastosMesCard(){
     '<div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><button class="btn ghost sm" id="gmAdd">➕ Agregar gasto</button><span class="hint">📦 Insumos: <b>'+mxn.format(insT)+'</b> · 🏢 Fijos: <b>'+mxn.format(fijT)+'</b> · Total '+sel+': <b>'+mxn.format(tot)+'</b></span></div>'+
     '<p class="hint" style="margin-top:6px">Se restan de tu ganancia para darte la <b>Ganancia NETA del negocio</b> (arriba). Captura cada mes lo que realmente te cobraron.</p></div>';
 }
-function renderDevol(){ const v=$('view-devol'); if(!v) return;
-  if(!DEVOL.length){ v.innerHTML='<div class="card"><h3 class="vh">↩️ Devoluciones y cancelaciones</h3><p class="hint">Aún no hay nada registrado. Cuando subas tus Excel de ventas, detecto automáticamente las ventas <b>canceladas</b> y <b>devueltas</b>, y aquí verás de qué productos son y cuánto te costaron.<br><br><b>Tip:</b> vuelve a subir tus Excel de ventas (incluso los de meses pasados) para juntar el historial — solo se suman las devoluciones, no toca el resto.</p></div>'; return; }
-  const byP={}; let nDev=0,nCan=0,udsT=0,refT=0;
-  for(const d of DEVOL){ const o=byP[d.sku]||(byP[d.sku]={sku:d.sku,nom:d.nom||nombreDe(d.sku),dev:0,can:0,u:0,anul:0});
-    if(d.tipo==='devolución'){o.dev++;nDev++;} else {o.can++;nCan++;}
-    const du=parseNum(d.u)||0, an=parseNum(d.anul)||0; o.u+=du; o.anul+=an; udsT+=du; refT+=an; }
-  const rows=Object.values(byP).sort((a,b)=>(b.dev+b.can)-(a.dev+a.can));
-  const ventasUds=SALES.reduce((a,s)=>a+(parseNum(s.u)||0),0);
-  const pct=(ventasUds+udsT)>0?(udsT/(ventasUds+udsT)*100):0;
-  const kpis=[
-    {l:'↩️ Devoluciones',v:num.format(nDev),s:'productos devueltos'},
-    {l:'🚫 Cancelaciones',v:num.format(nCan),s:'ventas canceladas'},
-    {l:'💸 Reembolsado',v:mxn.format(refT),c:'warn',s:'dinero que regresó al cliente'},
-    {l:'📉 % devuelto/cancelado',v:pct.toFixed(1)+'%',c:pct>=5?'bad':'good',s:num.format(udsT)+' de '+num.format(ventasUds+udsT)+' uds'}
-  ];
-  v.innerHTML='<div class="kpis">'+kpis.map(k=>`<div class="kpi ${k.c||''}"><div class="lbl">${k.l}</div><div class="val">${k.v}</div><div class="sub">${k.s||''}</div></div>`).join('')+'</div>'+
-    '<div class="card"><h3 class="vh">📦 Por producto <span style="font-weight:400;color:var(--muted);font-size:12px">— cuáles te devuelven o cancelan más</span></h3><div class="tablewrap" style="max-height:48vh"><table><thead><tr><th>Producto</th><th>SKU</th><th>↩️ Devol.</th><th>🚫 Cancel.</th><th>Uds</th><th>Reembolsado</th></tr></thead><tbody>'+
-      rows.map(p=>'<tr><td class="prod" style="max-width:260px">'+fotoThumb(p.sku)+escapeHtml(p.nom)+'</td><td>'+escapeHtml(p.sku)+'</td><td>'+(p.dev||'—')+'</td><td>'+(p.can||'—')+'</td><td>'+num.format(p.u)+'</td><td>'+(p.anul>0?mxn.format(p.anul):'—')+'</td></tr>').join('')+'</tbody></table></div></div>'+
-    '<div class="card"><h3 class="vh">🧾 Detalle <span style="font-weight:400;color:var(--muted);font-size:12px">— lo más reciente</span></h3><div class="tablewrap" style="max-height:42vh"><table><thead><tr><th>Fecha</th><th># de venta</th><th>Producto</th><th>Tipo</th><th>Uds</th><th>$</th></tr></thead><tbody>'+
-      DEVOL.slice().sort((a,b)=>(''+(b.f||'')).localeCompare(''+(a.f||''))).slice(0,200).map(d=>'<tr><td style="white-space:nowrap">'+escapeHtml(fechaCorta(d.f)||d.f||'—')+'</td><td>'+escapeHtml(d.vid||'—')+'</td><td class="prod" style="max-width:300px">'+escapeHtml(d.nom||d.sku)+'</td><td style="white-space:nowrap">'+(d.tipo==='devolución'?'↩️ devolución':'🚫 cancelación')+'</td><td>'+num.format(d.u)+'</td><td>'+(parseNum(d.anul)>0?mxn.format(d.anul):'—')+'</td></tr>').join('')+'</tbody></table></div>'+(DEVOL.length>200?'<p class="hint">Mostrando 200 de '+DEVOL.length+'.</p>':'')+'</div>';
+function renderDevol(){ const v=$('view-devol'); if(!v) return; const kp=$('devolKpis'), bx=$('devolBox'); if(!kp||!bx) return;
+  if($('devolSearch')&&document.activeElement!==$('devolSearch')) $('devolSearch').value=DEVOLSEARCH;
+  if(!DEVOL.length){ kp.innerHTML=''; bx.innerHTML='<div class="card"><h3 class="vh">↩️ Devoluciones y cancelaciones</h3><p class="hint">Aún no hay nada registrado. Cuando subas tus Excel de ventas, detecto automáticamente las ventas <b>canceladas</b> y <b>devueltas</b>, y aquí verás de qué productos son, cuánto te costaron y el <b>motivo</b>.<br><br><b>Tip:</b> vuelve a subir tus Excel de ventas (incluso los de meses pasados) para juntar el historial — solo suma las devoluciones, no toca lo demás.</p></div>'; return; }
+  const motOf=d=>(d.motivo||d.est||(d.tipo==='devolución'?'Devolución (sin detalle)':'Cancelación (sin detalle)'));
+  const q=norm(DEVOLSEARCH);
+  const fdev=DEVOL.filter(d=>!q||norm((d.nom||'')+' '+(d.sku||'')+' '+(d.vid||'')+' '+motOf(d)+' '+(d.pid||'')).includes(q));
+  let nDev=0,nCan=0,udsT=0,refT=0; fdev.forEach(d=>{ if(d.tipo==='devolución')nDev++; else nCan++; udsT+=parseNum(d.u)||0; refT+=parseNum(d.anul)||0; });
+  const ventasUds=SALES.reduce((a,s)=>a+(parseNum(s.u)||0),0); const pct=(ventasUds+udsT)>0?(udsT/(ventasUds+udsT)*100):0;
+  kp.innerHTML=[{l:'↩️ Devoluciones',v:num.format(nDev),s:'productos devueltos'},{l:'🚫 Cancelaciones',v:num.format(nCan),s:'ventas canceladas'},{l:'💸 Reembolsado',v:mxn.format(refT),c:'warn',s:'dinero que regresó'},{l:'📉 % devuelto/cancelado',v:pct.toFixed(1)+'%',c:pct>=5?'bad':'good',s:num.format(udsT)+' de '+num.format(ventasUds+udsT)+' uds'}].map(k=>`<div class="kpi ${k.c||''}"><div class="lbl">${k.l}</div><div class="val">${k.v}</div><div class="sub">${k.s||''}</div></div>`).join('');
+  const byM={}; fdev.forEach(d=>{ const mt=motOf(d), o=byM[mt]||(byM[mt]={motivo:mt,n:0,u:0,anul:0}); o.n++; o.u+=parseNum(d.u)||0; o.anul+=parseNum(d.anul)||0; });
+  const motRows=Object.values(byM).sort((a,b)=>b.n-a.n), totN=motRows.reduce((a,x)=>a+x.n,0);
+  const motHtml='<div class="card"><h3 class="vh">🎯 Por motivo <span style="font-weight:400;color:var(--muted);font-size:12px">— tu razón #1 de devoluciones/cancelaciones</span></h3><div class="tablewrap" style="max-height:34vh"><table><thead><tr><th>Motivo</th><th># veces</th><th>% del total</th><th>Uds</th><th>Reembolsado</th></tr></thead><tbody>'+motRows.map((mt,i)=>'<tr><td class="prod" style="max-width:360px">'+(i===0?'🥇 ':i===1?'🥈 ':i===2?'🥉 ':'')+escapeHtml(mt.motivo)+'</td><td><b>'+num.format(mt.n)+'</b></td><td>'+(totN?Math.round(mt.n/totN*100):0)+'%</td><td>'+num.format(mt.u)+'</td><td>'+(mt.anul>0?mxn.format(mt.anul):'—')+'</td></tr>').join('')+'<tr style="border-top:2px solid var(--line,#eee);font-weight:700"><td>TOTAL</td><td>'+num.format(totN)+'</td><td>100%</td><td>'+num.format(motRows.reduce((a,x)=>a+x.u,0))+'</td><td>'+mxn.format(motRows.reduce((a,x)=>a+x.anul,0))+'</td></tr></tbody></table></div></div>';
+  const byP={}; fdev.forEach(d=>{ const o=byP[d.sku]||(byP[d.sku]={sku:d.sku,nom:d.nom||nombreDe(d.sku),dev:0,can:0,u:0,anul:0,tot:0}); if(d.tipo==='devolución')o.dev++; else o.can++; o.u+=parseNum(d.u)||0; o.anul+=parseNum(d.anul)||0; o.tot=o.dev+o.can; });
+  const sk=DEVOLSORT.key,sd=DEVOLSORT.dir; const pRows=Object.values(byP).sort((a,b)=>{ if(sk==='nom') return sd*(''+(a.nom||'')).localeCompare(''+(b.nom||''),'es'); return sd*(((parseNum(a[sk])||0)-(parseNum(b[sk])||0))); });
+  const thp=(t,k)=>'<th data-dk="'+k+'" style="cursor:pointer;white-space:nowrap">'+t+(DEVOLSORT.key===k?(DEVOLSORT.dir<0?' ▾':' ▴'):'')+'</th>';
+  const prodHtml='<div class="card"><h3 class="vh">📦 Por producto <span style="font-weight:400;color:var(--muted);font-size:12px">— clic en los títulos para ordenar</span></h3><div class="tablewrap" style="max-height:46vh"><table><thead><tr>'+thp('Producto','nom')+thp('↩️ Devol.','dev')+thp('🚫 Cancel.','can')+thp('Total','tot')+thp('Uds','u')+thp('Reembolsado','anul')+'</tr></thead><tbody>'+pRows.map(p=>'<tr><td class="prod" style="max-width:280px">'+fotoThumb(p.sku)+escapeHtml(p.nom)+' <small style="color:var(--muted)">'+escapeHtml(p.sku)+'</small></td><td>'+(p.dev||'—')+'</td><td>'+(p.can||'—')+'</td><td><b>'+num.format(p.tot)+'</b></td><td>'+num.format(p.u)+'</td><td>'+(p.anul>0?mxn.format(p.anul):'—')+'</td></tr>').join('')+'<tr style="border-top:2px solid var(--line,#eee);font-weight:700"><td>TOTAL ('+pRows.length+' productos)</td><td>'+num.format(pRows.reduce((a,x)=>a+x.dev,0))+'</td><td>'+num.format(pRows.reduce((a,x)=>a+x.can,0))+'</td><td>'+num.format(pRows.reduce((a,x)=>a+x.tot,0))+'</td><td>'+num.format(pRows.reduce((a,x)=>a+x.u,0))+'</td><td>'+mxn.format(pRows.reduce((a,x)=>a+x.anul,0))+'</td></tr></tbody></table></div></div>';
+  const detHtml='<div class="card"><h3 class="vh">🧾 Detalle <span style="font-weight:400;color:var(--muted);font-size:12px">— lo más reciente</span></h3><div class="tablewrap" style="max-height:42vh"><table><thead><tr><th>Fecha</th><th># de venta</th><th>Producto</th><th>Motivo</th><th>Tipo</th><th>Uds</th><th>$</th></tr></thead><tbody>'+fdev.slice().sort((a,b)=>(''+(b.f||'')).localeCompare(''+(a.f||''))).slice(0,300).map(d=>'<tr><td style="white-space:nowrap">'+escapeHtml(fechaCorta(d.f)||d.f||'—')+'</td><td>'+escapeHtml(d.vid||'—')+'</td><td class="prod" style="max-width:240px">'+escapeHtml(d.nom||d.sku)+'</td><td style="max-width:220px;font-size:12px;color:var(--muted)">'+escapeHtml(motOf(d))+'</td><td style="white-space:nowrap">'+(d.tipo==='devolución'?'↩️ devol.':'🚫 cancel.')+'</td><td>'+num.format(d.u)+'</td><td>'+(parseNum(d.anul)>0?mxn.format(d.anul):'—')+'</td></tr>').join('')+'</tbody></table></div>'+(fdev.length>300?'<p class="hint">Mostrando 300 de '+fdev.length+'.</p>':'')+'</div>';
+  bx.innerHTML=motHtml+prodHtml+detHtml;
 }
 function monthlyStats(){
   const comPct=parseNum($('comPct').value), comFija=parseNum($('comFija').value), envioU=parseNum($('envio').value), empaqueU=parseNum($('empaqueU').value)||0;
@@ -1124,6 +1128,9 @@ if($('invActBtn')) $('invActBtn').addEventListener('click',()=>{ INVSOLOACT=!INV
 if($('invCountBtn')) $('invCountBtn').addEventListener('click',()=>{ INVPEND=!INVPEND; renderInventario(); });
 if($('fotoUpload')) $('fotoUpload').addEventListener('change',e=>{ const f=e.target.files[0]; if(f){ if(FOTOMODE==='bulk') uploadFotoBulk(f); else uploadFotoManual(f); } e.target.value=''; });
 $('reabSearch').addEventListener('input',e=>{ REABSEARCH=e.target.value; renderReabasto(); });
+if($('devolSearch')) $('devolSearch').addEventListener('input',e=>{ DEVOLSEARCH=e.target.value; renderDevol(); });
+if($('view-devol')) $('view-devol').addEventListener('click',e=>{ const th=e.target.closest('th[data-dk]'); if(!th) return; const k=th.dataset.dk; if(DEVOLSORT.key===k) DEVOLSORT.dir*=-1; else DEVOLSORT={key:k,dir:-1}; renderDevol(); });
+if($('devolExport')) $('devolExport').addEventListener('click',()=>{ const q=norm(DEVOLSEARCH), motOf=d=>(d.motivo||d.est||d.tipo); const f=DEVOL.filter(d=>!q||norm((d.nom||'')+' '+(d.sku||'')+' '+(d.vid||'')+' '+motOf(d)).includes(q)); dl('devoluciones.csv',['Fecha','NumVenta','SKU','Producto','Motivo','Tipo','Uds','Reembolsado'], f.map(d=>[d.f||'',d.vid||'',d.sku||'',d.nom||'',motOf(d),d.tipo||'',d.u||0,round2(d.anul||0)])); });
 function copyText(t){ try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t); return true; } }catch(e){}
   try{ const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); return true; }catch(e){ return false; } }
 function reabLastSale(){ let l=''; for(const s of SALES){ if(s.f&&s.f>l) l=s.f; } return l||hoy(); }
