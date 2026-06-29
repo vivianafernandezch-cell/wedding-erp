@@ -285,7 +285,7 @@ const TN_FOTOS={"1000V":"https://dcdn-us.mitiendanube.com/stores/007/111/969/pro
 const SB_URL='https://aeyqebymbtnzwtczwabs.supabase.co';
 const SB_KEY='sb_publishable_b7Tt6IffSjZKnllb3LHjOg_stTUC8z5';
 const CLOUD_ON = !!(window.supabase && SB_URL && SB_KEY && location.protocol.indexOf('http')===0);
-let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null, _cloudStamp=localStorage.getItem('erp_cloud_stamp')||'', _cloudPulling=false;
+let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null, _cloudStamp=localStorage.getItem('erp_cloud_stamp')||'', _cloudPulling=false, _cloudErr='';
 if(CLOUD_ON){ try{ SB=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}); }catch(e){ console.error('Supabase init:',e); } }
 let DIAGSKU="", INVNEG=false, INVNOFOTO=false, FOTOSEL="", SELSKU=new Set(), FOTOMODE='single', INVUBIC="", INVSOLOACT=loadJSON('ml_invact_v3',false), INVPEND=false, COUNTED=loadJSON(LS_COUNTED,{});
 function saveHidden(){ saveJSON(LS_HIDDEN,[...HIDDEN]); }
@@ -1447,9 +1447,9 @@ async function cloudSaveNow(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return; try{
   const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
   const stamp=new Date().toISOString();
   const {error}=await SB.from('erp_state').upsert({user_id:CLOUD_USER.id,data,updated_at:stamp},{onConflict:'user_id'});
-  if(error){ cloudDotSet('⚠️ no se guardó'); console.error('cloudSave:',error); }
-  else { _cloudStamp=stamp; try{localStorage.setItem('erp_cloud_stamp',stamp);}catch(e){} cloudDotSet('☁️ guardado'); setTimeout(()=>cloudDotSet('☁️ al día'),1500); }
-}catch(e){ console.error(e); cloudDotSet('⚠️ sin conexión'); } }
+  if(error){ _cloudErr=error.message||(error.code?('código '+error.code):JSON.stringify(error)); cloudDotSet('⚠️ NO guarda (toca)'); console.error('cloudSave:',error); cloudErrBanner(true); }
+  else { _cloudErr=''; _cloudStamp=stamp; try{localStorage.setItem('erp_cloud_stamp',stamp);}catch(e){} cloudDotSet('☁️ guardado'); cloudErrBanner(false); setTimeout(()=>cloudDotSet('☁️ al día'),1500); }
+}catch(e){ _cloudErr=(e&&e.message)||(''+e); console.error(e); cloudDotSet('⚠️ sin internet (toca)'); cloudErrBanner(true); } }
 async function cloudLoad(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return false; try{
   const {data,error}=await SB.from('erp_state').select('data,updated_at').eq('user_id',CLOUD_USER.id).maybeSingle();
   if(error){ console.error('cloudLoad:',error); return false; }
@@ -1474,6 +1474,28 @@ async function cloudPullIfNewer(force){
   }catch(e){ console.error(e); }
   _cloudPulling=false;
 }
+function cloudErrBanner(show){ let b=$('cloudErrBar');
+  if(show){ if(!b){ b=document.createElement('div'); b.id='cloudErrBar'; b.style.cssText='position:fixed;top:48px;right:10px;z-index:901;background:#c0392b;color:#fff;border-radius:10px;padding:8px 11px;font:600 12px system-ui,sans-serif;max-width:260px;line-height:1.35;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer'; b.onclick=cloudDiag; document.body.appendChild(b); } b.textContent='⚠️ Tus cambios NO se están guardando en la nube. Toca aquí.'; }
+  else if(b){ b.remove(); } }
+async function cloudDiag(){
+  if(!CLOUD_ON||!SB||!CLOUD_USER){ alert('Esta versión no está en modo nube (ábrela desde tu link en línea, con tu correo).'); return; }
+  let bytes=0; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) bytes+=v.length; });
+  const mb=(bytes/1048576).toFixed(2);
+  cloudDotSet('☁️ probando…');
+  await cloudSaveNow();                       // intenta guardar AHORA y captura el error real si lo hay
+  let cloudInfo='?';
+  try{ const {data,error}=await SB.from('erp_state').select('updated_at').eq('user_id',CLOUD_USER.id).maybeSingle();
+    cloudInfo = error ? ('⚠️ ERROR al leer: '+(error.message||error.code)) : (data&&data.updated_at ? new Date(data.updated_at).toLocaleString('es-MX') : '(la nube está VACÍA)');
+  }catch(e){ cloudInfo='⚠️ '+(e.message||e); }
+  let msg='☁️ ESTADO DE SINCRONIZACIÓN\n\n';
+  msg+='Cuenta: '+((CLOUD_USER&&CLOUD_USER.email)||'?')+'\n';
+  msg+='Tus datos pesan: '+mb+' MB\n';
+  msg+='Movimientos: '+MOVS.length+'  ·  Ventas: '+SALES.length+'\n';
+  msg+='Guardado en la nube por última vez: '+cloudInfo+'\n\n';
+  if(_cloudErr){ msg+='❌ NO SE PUDO GUARDAR.\nError: '+_cloudErr+'\n\n👉 Cópiale ESTE error a Claude. (Casi siempre es por permisos/RLS de la tabla erp_state.)'; }
+  else { msg+='✅ Acabo de guardar bien en la nube.\nSi tu otra compu no lo ve: ábrela y toca 🔄 (o cambia de pestaña y regresa).'; }
+  alert(msg);
+}
 function cloudSplash(msg){ let o=$('cloudSplash'); if(!o){ o=document.createElement('div'); o.id='cloudSplash'; o.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#e4846d,#e6bfac);color:#fff;font:600 18px system-ui,sans-serif;text-align:center;padding:24px'; document.body.appendChild(o); } o.innerHTML='<div><div style="font-size:34px;margin-bottom:10px">☁️</div>'+escapeHtml(msg)+'</div>'; }
 function showLogin(msg){ let o=$('cloudSplash'); if(!o){ o=document.createElement('div'); o.id='cloudSplash'; o.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#e4846d,#e6bfac);padding:24px'; document.body.appendChild(o); }
   o.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px 26px;max-width:380px;width:100%;box-sizing:border-box;box-shadow:0 12px 40px rgba(0,0,0,.2);font-family:system-ui,sans-serif;text-align:center">'+
@@ -1496,6 +1518,7 @@ function mountCloudBar(){ if($('cloudBar')) return; const b=document.createEleme
   b.innerHTML='<span id="cloudDot">☁️ en la nube</span><span style="opacity:.4">·</span><span title="'+mail+'" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mail+'</span> <button id="cloudSync" title="Buscar cambios de mi otra compu o celular" style="border:0;background:#f3ece9;border-radius:999px;padding:4px 9px;cursor:pointer;font-size:13px;color:#6a5a52">🔄</button> <button id="cloudOut" style="border:0;background:#f3ece9;border-radius:999px;padding:4px 10px;cursor:pointer;font-size:12px;color:#6a5a52">Salir</button>';
   document.body.appendChild(b); const o=$('cloudOut'); if(o) o.onclick=doLogout;
   const sy=$('cloudSync'); if(sy) sy.onclick=()=>cloudPullIfNewer(true);
+  const dt=$('cloudDot'); if(dt){ dt.style.cursor='pointer'; dt.title='Ver estado de sincronización / probar guardado'; dt.onclick=cloudDiag; }
   window.addEventListener('visibilitychange',()=>{ if(!CLOUD_USER) return; if(document.visibilityState==='hidden'){ clearTimeout(_cloudT); cloudSaveNow(); } else cloudPullIfNewer(); });
   window.addEventListener('focus',()=>{ if(CLOUD_USER) cloudPullIfNewer(); });
   window.addEventListener('beforeunload',()=>{ if(CLOUD_USER&&_cloudT){ clearTimeout(_cloudT); cloudSaveNow(); } });
