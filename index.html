@@ -285,7 +285,7 @@ const TN_FOTOS={"1000V":"https://dcdn-us.mitiendanube.com/stores/007/111/969/pro
 const SB_URL='https://aeyqebymbtnzwtczwabs.supabase.co';
 const SB_KEY='sb_publishable_b7Tt6IffSjZKnllb3LHjOg_stTUC8z5';
 const CLOUD_ON = !!(window.supabase && SB_URL && SB_KEY && location.protocol.indexOf('http')===0);
-let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null;
+let SB=null, CLOUD_USER=null, cloudApplying=false, _cloudT=null, _cloudStamp=localStorage.getItem('erp_cloud_stamp')||'', _cloudPulling=false;
 if(CLOUD_ON){ try{ SB=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}); }catch(e){ console.error('Supabase init:',e); } }
 let DIAGSKU="", INVNEG=false, INVNOFOTO=false, FOTOSEL="", SELSKU=new Set(), FOTOMODE='single', INVUBIC="", INVSOLOACT=loadJSON('ml_invact_v3',false), INVPEND=false, COUNTED=loadJSON(LS_COUNTED,{});
 function saveHidden(){ saveJSON(LS_HIDDEN,[...HIDDEN]); }
@@ -1029,6 +1029,10 @@ $('fullFile').addEventListener('change',async e=>{ const f=e.target.files[0]; if
 function fullFactor(pubRaw,sku){ if(!pubRaw) return 1; const d=(''+pubRaw).replace(/\D/g,''); if(!d) return 1;
   for(const key in RECETAS){ const kd=(''+key).split('|')[0].replace(/\D/g,''); if(kd&&kd===d){ const it=(RECETAS[key]||[]).find(x=>x.sku===sku); if(it&&(parseNum(it.qty)||0)>1) return parseNum(it.qty); } }
   return 1; }
+/* tamaño del paquete de una pieza por su SKU: si tiene una receta "set de N de sí misma" devuelve N (para descontar piezas de bodega) */
+function packOf(sku){ if(!sku) return 1; let q=1;
+  for(const key in RECETAS){ const comps=RECETAS[key]||[]; if(comps.length!==1) continue; const it=comps[0]; if(it&&it.sku===sku){ const v=parseNum(it.qty)||1; if(v>q) q=v; } }
+  return q; }
 function applyFullFile(){ if(!RAWFULL||!FULLMAP.sku||!FULLMAP.full){alert('Elige SKU y la columna de stock en Full.');return;}
   FULL={}; CAMINO={}; const fNameCol=guess(RAWFULL.headers,['producto','título de la publicaci','titulo','título','descripci']);
   const fPubCol=guessEx(RAWFULL.headers,['# publicaci','número de publicaci','numero de publicaci','publicaci'],['título','titulo','estado','canal','tipo']);
@@ -1188,11 +1192,16 @@ function addMovManual(){
 }
 function aplicarEnvioFull(){
   if(!RAWE2F||!E2FMAP.sku||!E2FMAP.cant) return alert('Elige las columnas de SKU y cantidad.');
-  let n=0,tot=0; const refTxt=E2FID?('envío #'+E2FID):'envío';
-  for(const r of RAWE2F.rows){ const sku=(r[E2FMAP.sku]||'').trim(); const c=parseNum(r[E2FMAP.cant]); if(!sku||c<=0) continue; addMov({tipo:'Envío a Full',sku:sku,ubic:'bodega',salida:c,nota:refTxt,ref:E2FID}); addMov({tipo:'Envío a Full',sku:sku,ubic:'full',entrada:c,nota:refTxt,ref:E2FID}); n++; tot+=c; }
-  if(!n) return alert('No encontré filas con SKU y cantidad válidos.');
+  let n=0,totFull=0,totBod=0,mult=0,replaced=0; const refTxt=E2FID?('envío #'+E2FID):'envío';
+  if(E2FID){ for(let i=MOVS.length-1;i>=0;i--){ if(MOVS[i].tipo==='Envío a Full' && MOVS[i].ref===E2FID){ MOVS.splice(i,1); replaced++; } } }  // re-importar el MISMO envío reemplaza el anterior (no duplica)
+  for(const r of RAWE2F.rows){ const sku=(r[E2FMAP.sku]||'').trim(); const apt=parseNum(r[E2FMAP.cant]); if(!sku||apt<=0) continue;
+    const pk=packOf(sku), piezas=apt*pk; if(pk>1) mult++;
+    addMov({tipo:'Envío a Full',sku:sku,ubic:'bodega',salida:piezas,nota:refTxt+(pk>1?(' · '+apt+'×'+pk+' pzas/paquete'):''),ref:E2FID});
+    addMov({tipo:'Envío a Full',sku:sku,ubic:'full',entrada:apt,nota:refTxt,ref:E2FID});
+    n++; totFull+=apt; totBod+=piezas; }
+  if(!n) return alert('No encontré filas con unidades aptas para vender > 0.\n(Las filas en 0 no mueven nada — eso es correcto.)');
   saveMovs(); recomputeLive(); RAWE2F=null; const eid=E2FID; E2FID=''; afterMov();
-  alert('✅ Registré '+(eid?('el envío #'+eid):'el envío')+' a Full:\n• '+n+' productos\n• '+num.format(tot)+' unidades en total dadas de ENTRADA a Full\n(y restadas de tu bodega).');
+  alert('✅ Registré '+(eid?('el envío #'+eid):'el envío')+' a Full:\n• '+n+' productos\n• Full +'+num.format(totFull)+' unidades para vender (igual que en ML)\n• Bodega −'+num.format(totBod)+' piezas'+(mult?('\n• En '+mult+' producto(s) que son paquete/kit multipliqué por el tamaño del paquete para descontar bien las piezas de tu bodega.'):'')+(replaced?('\n• 🔁 Reemplacé '+replaced+' movimientos de una importación anterior de este mismo envío (no se duplicó).'):'')+'\n\nLas filas con 0 aptas para vender no movieron nada.');
 }
 function ajustarFullaML(){
   if(!Object.keys(FULL).length) return alert('Primero sube tu reporte de Full de ML (arriba, en Inventario).');
@@ -1246,7 +1255,7 @@ function renderMovimientos(){
       '<div id="genSkuBox"></div>'+
       '<div id="loteBox"></div>'+
       '<p class="hint">El <b>costo</b> de las entradas se promedia (ponderado) para tu costo de producto. El buscador encuentra por nombre o SKU (sin acentos).</p></div>'+
-    '<div class="card"><h3 class="vh">📤 Envío a Full (archivo)</h3><p class="hint" style="margin-top:-2px">Toma 2 columnas: <b>SKU</b> y <b>cantidad que MANDASTE</b> en ese envío (tú eliges cuáles tras subirlo). Resta de bodega y suma a Full. ⚠️ Debe ser lo que <b>enviaste</b>, NO "aptas para vender" (eso es tu stock actual en Full — para cuadrar tu Full con el reporte de ML, usa el botón de <b>cuadre</b> de más abajo).</p><input type="file" id="e2fFile" accept=".xlsx,.csv,.txt"><div id="e2fBox" class="hide" style="margin-top:10px"><div class="row" id="e2fFields"></div><button class="btn sm" id="btnE2F" style="margin-top:8px">Aplicar envío ▸</button></div><div id="e2fMsg" class="hint"></div></div>'+
+    '<div class="card"><h3 class="vh">📤 Envío a Full (archivo)</h3><p class="hint" style="margin-top:-2px">Toma 2 columnas: <b>SKU</b> y <b>unidades APTAS PARA VENDER</b> (las que SÍ llegaron a tu Full; tú eliges la columna tras subirlo). <b>Suma</b> esas unidades a tu Full (igual que las cuenta ML) y <b>descuenta de tu bodega las piezas</b>: si la publicación es un <b>paquete/kit</b> (ej. set de 4), multiplica por el tamaño del paquete. ✅ Las filas con <b>0 aptas para vender</b> no mueven nada.</p><input type="file" id="e2fFile" accept=".xlsx,.csv,.txt"><div id="e2fBox" class="hide" style="margin-top:10px"><div class="row" id="e2fFields"></div><button class="btn sm" id="btnE2F" style="margin-top:8px">Aplicar envío ▸</button></div><div id="e2fMsg" class="hint"></div></div>'+
     cuadre+
     '<div class="card"><div class="tbar"><h3 class="vh">📒 Historial de movimientos ('+MOVS.length+')</h3><div class="row" style="gap:8px"><input type="text" id="movSearch" placeholder="🔍 Buscar fecha, tipo, SKU, proveedor, comentario…" style="width:300px" value="'+escapeHtml(MOVSEARCH)+'"><button class="btn ghost sm" id="movExport">⬇️ CSV</button></div></div><div class="tablewrap" style="max-height:55vh"><table><thead><tr id="movHead"></tr></thead><tbody id="movBody"></tbody></table></div></div>';
   renderHistorial(); renderLote();
@@ -1354,9 +1363,9 @@ $('view-movim').addEventListener('change',async e=>{
   if(e.target.id==='invCorte'){ INVCORTE=e.target.value||''; saveJSON(LS_INVCORTE,INVCORTE); syncSalesMovs(); recomputeLive(); afterMov(); return; }
   if(e.target.classList&&e.target.classList.contains('movQty')){ const m=MOVS.find(x=>x.id===e.target.dataset.id); if(m){ m[e.target.dataset.f]=Math.max(0,parseNum(e.target.value)); saveMovs(); recomputeLive(); afterMov(); } return; }
   if(e.target.id!=='e2fFile') return; const f=e.target.files[0]; if(!f) return; E2FID=(f.name.match(/inbound[-_ ]?(\d+)/i)||[])[1]||''; $('e2fMsg').innerHTML='<span class="spin"></span>Leyendo…';
-  try{ const t=rowsToTable(await readFileToGrid(f)); RAWE2F=t; E2FMAP.sku=guess(t.headers,['sku','código','codigo'])||t.headers[0]||''; E2FMAP.cant=guessEx(t.headers,['cantidad recibida','cantidad enviada','unidades enviadas','received quantity','quantity received','sent quantity','quantity sent','recibidas','enviadas','recibido','enviado','received','sent','shipped','enviar','cantidad','unidades','quantity','units','piezas','qty'],['costo','precio','price','cost','total','aptas','apta','vender','sellable','available','disponible','en full','in full','deposito','depósito','camino','agotar','tiempo','ocupan'])||'';
+  try{ const t=rowsToTable(await readFileToGrid(f)); RAWE2F=t; E2FMAP.sku=guess(t.headers,['sku','código','codigo'])||t.headers[0]||''; E2FMAP.cant=guessEx(t.headers,['aptas para vender','unidades aptas para vender','aptas','unidades disponibles para vender','disponibles para vender','disponibles para venta','disponible para vender','unidades disponibles','disponibles','disponible','cantidad recibida','recibidas','recibido','received','cantidad enviada','unidades enviadas','enviadas','enviado','shipped','cantidad','unidades','quantity','units','piezas','qty'],['costo','precio','price','cost','total','camino','transferencia','traslado','tránsito','transito','agotar','tiempo','ocupan','no aptas','no apta','reservad','dañad','danad','pendiente','afectan'])||'';
     E2FMAP.sku=E2FMAP.sku||guess(t.headers,['sku','código','codigo','seller sku'])||'';
-    $('e2fFields').innerHTML='<label class="field"><b>Columna SKU</b><select data-e="sku">'+optsFor(t.headers,E2FMAP.sku)+'</select></label><label class="field"><b>Columna de cantidad ENVIADA</b><select data-e="cant">'+optsFor(t.headers,E2FMAP.cant)+'</select></label>';
+    $('e2fFields').innerHTML='<label class="field"><b>Columna SKU</b><select data-e="sku">'+optsFor(t.headers,E2FMAP.sku)+'</select></label><label class="field"><b>Columna de UNIDADES (aptas para vender)</b><select data-e="cant">'+optsFor(t.headers,E2FMAP.cant)+'</select></label>';
     $('e2fFields').querySelectorAll('select').forEach(s=>s.onchange=()=>E2FMAP[s.dataset.e]=s.value);
     $('e2fBox').classList.remove('hide'); $('e2fMsg').textContent='Leí '+t.rows.length+' filas. Confirma columnas y aplica.';
   }catch(err){ $('e2fMsg').textContent=''; alert('No pude leer el archivo: '+err.message); }
@@ -1436,17 +1445,35 @@ function cloudDotSet(t){ const d=$('cloudDot'); if(d) d.textContent=t; }
 function cloudQueueSave(){ if(!CLOUD_ON||!SB||!CLOUD_USER||cloudApplying) return; clearTimeout(_cloudT); cloudDotSet('☁️ guardando…'); _cloudT=setTimeout(cloudSaveNow,1200); }
 async function cloudSaveNow(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return; try{
   const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
-  const {error}=await SB.from('erp_state').upsert({user_id:CLOUD_USER.id,data,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+  const stamp=new Date().toISOString();
+  const {error}=await SB.from('erp_state').upsert({user_id:CLOUD_USER.id,data,updated_at:stamp},{onConflict:'user_id'});
   if(error){ cloudDotSet('⚠️ no se guardó'); console.error('cloudSave:',error); }
-  else { cloudDotSet('☁️ guardado'); setTimeout(()=>cloudDotSet('☁️ en la nube'),1500); }
+  else { _cloudStamp=stamp; try{localStorage.setItem('erp_cloud_stamp',stamp);}catch(e){} cloudDotSet('☁️ guardado'); setTimeout(()=>cloudDotSet('☁️ al día'),1500); }
 }catch(e){ console.error(e); cloudDotSet('⚠️ sin conexión'); } }
 async function cloudLoad(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return false; try{
-  const {data,error}=await SB.from('erp_state').select('data').eq('user_id',CLOUD_USER.id).maybeSingle();
+  const {data,error}=await SB.from('erp_state').select('data,updated_at').eq('user_id',CLOUD_USER.id).maybeSingle();
   if(error){ console.error('cloudLoad:',error); return false; }
   if(data&&data.data&&typeof data.data==='object'&&Object.keys(data.data).length){
-    cloudApplying=true; BACKUP_KEYS.forEach(k=>{ if(data.data[k]!=null) localStorage.setItem(k,data.data[k]); }); cloudApplying=false; return true; }
+    cloudApplying=true; BACKUP_KEYS.forEach(k=>{ if(data.data[k]!=null) localStorage.setItem(k,data.data[k]); }); cloudApplying=false;
+    if(data.updated_at){ _cloudStamp=data.updated_at; try{localStorage.setItem('erp_cloud_stamp',data.updated_at);}catch(e){} }
+    return true; }
   return false;
 }catch(e){ console.error(e); return false; } }
+/* trae cambios de la otra compu/cel SOLO si la nube es más nueva que lo que tengo (evita pisar datos) */
+async function cloudPullIfNewer(force){
+  if(!CLOUD_ON||!SB||!CLOUD_USER||cloudApplying||_cloudPulling) return;
+  if(_cloudT){ if(!force) return; clearTimeout(_cloudT); await cloudSaveNow(); }   // tengo cambios sin guardar → primero los subo, no los piso
+  _cloudPulling=true;
+  try{
+    const {data,error}=await SB.from('erp_state').select('updated_at').eq('user_id',CLOUD_USER.id).maybeSingle();
+    if(!error && data && data.updated_at && data.updated_at>_cloudStamp){
+      cloudDotSet('☁️ actualizando…'); cloudSplash('Trayendo los cambios de tu otra sesión…');
+      if(await cloudLoad()){ location.reload(); return; }
+      const sp=$('cloudSplash'); if(sp) sp.remove();
+    } else if(force){ cloudDotSet('☁️ ya estás al día'); setTimeout(()=>cloudDotSet('☁️ en la nube'),1800); }
+  }catch(e){ console.error(e); }
+  _cloudPulling=false;
+}
 function cloudSplash(msg){ let o=$('cloudSplash'); if(!o){ o=document.createElement('div'); o.id='cloudSplash'; o.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#e4846d,#e6bfac);color:#fff;font:600 18px system-ui,sans-serif;text-align:center;padding:24px'; document.body.appendChild(o); } o.innerHTML='<div><div style="font-size:34px;margin-bottom:10px">☁️</div>'+escapeHtml(msg)+'</div>'; }
 function showLogin(msg){ let o=$('cloudSplash'); if(!o){ o=document.createElement('div'); o.id='cloudSplash'; o.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#e4846d,#e6bfac);padding:24px'; document.body.appendChild(o); }
   o.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px 26px;max-width:380px;width:100%;box-sizing:border-box;box-shadow:0 12px 40px rgba(0,0,0,.2);font-family:system-ui,sans-serif;text-align:center">'+
@@ -1466,9 +1493,12 @@ async function doLogin(){ const em=(($('loginEmail')||{}).value||'').trim(), m=$
 async function doLogout(){ try{ await SB.auth.signOut(); }catch(e){} sessionStorage.removeItem('cloudLoaded'); location.reload(); }
 function mountCloudBar(){ if($('cloudBar')) return; const b=document.createElement('div'); b.id='cloudBar'; b.style.cssText='position:fixed;top:8px;right:10px;z-index:900;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #eadfd9;border-radius:999px;padding:4px 6px 4px 12px;box-shadow:0 4px 14px rgba(0,0,0,.12);font:500 12px system-ui,sans-serif;color:#6a5a52';
   const mail=escapeHtml((CLOUD_USER&&CLOUD_USER.email)||'');
-  b.innerHTML='<span id="cloudDot">☁️ en la nube</span><span style="opacity:.4">·</span><span title="'+mail+'" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mail+'</span> <button id="cloudOut" style="border:0;background:#f3ece9;border-radius:999px;padding:4px 10px;cursor:pointer;font-size:12px;color:#6a5a52">Salir</button>';
+  b.innerHTML='<span id="cloudDot">☁️ en la nube</span><span style="opacity:.4">·</span><span title="'+mail+'" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+mail+'</span> <button id="cloudSync" title="Buscar cambios de mi otra compu o celular" style="border:0;background:#f3ece9;border-radius:999px;padding:4px 9px;cursor:pointer;font-size:13px;color:#6a5a52">🔄</button> <button id="cloudOut" style="border:0;background:#f3ece9;border-radius:999px;padding:4px 10px;cursor:pointer;font-size:12px;color:#6a5a52">Salir</button>';
   document.body.appendChild(b); const o=$('cloudOut'); if(o) o.onclick=doLogout;
-  window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'&&CLOUD_USER){ clearTimeout(_cloudT); cloudSaveNow(); } });
+  const sy=$('cloudSync'); if(sy) sy.onclick=()=>cloudPullIfNewer(true);
+  window.addEventListener('visibilitychange',()=>{ if(!CLOUD_USER) return; if(document.visibilityState==='hidden'){ clearTimeout(_cloudT); cloudSaveNow(); } else cloudPullIfNewer(); });
+  window.addEventListener('focus',()=>{ if(CLOUD_USER) cloudPullIfNewer(); });
+  window.addEventListener('beforeunload',()=>{ if(CLOUD_USER&&_cloudT){ clearTimeout(_cloudT); cloudSaveNow(); } });
 }
 function fotoMsgSet(t){ const m=$('fotoMsg'); if(m) m.innerHTML=t; }
 async function importarFotos(){
