@@ -316,9 +316,9 @@ let RECSPLIT=loadJSON(LS_RECSPLIT,{});   // por receta-key: true = en Full se SE
 let ZAPMAN=loadJSON(LS_ZAPMAN,{});   // {sku: true/false} override manual de negocio: true=zapatos, false=bodas/otros; sin llave = auto por nombre
 let CUADREMODE=loadJSON(LS_CUADRE,false);   // modo cuadre: mientras está ON, cada entrada/salida se etiqueta "cuadre de inventario" sin escribirlo
 let SALES=loadJSON(LS_SALES,[]), SALEFILTER=loadJSON(LS_SALEFILTER,null), INVCORTE=loadJSON(LS_INVCORTE,'');
-let DEVOL=loadJSON(LS_DEVOL,[]);   // devoluciones/cancelaciones detectadas al subir ventas
+let DEVOL=loadJSON(LS_DEVOL,[]); DEVOL.forEach(d=>{ if(d.rec===undefined) d.rec='auto'; });   // devoluciones/cancelaciones detectadas al subir ventas
 let GASTOSMES=loadJSON(LS_GASTOSMES,{}), GMSEL="";
-const LS_CONC="ml_conc_v3"; let CONC=loadJSON(LS_CONC,{susc:399,meses:{}}), CONCSEL="", CONCFILES={}, CONCALL=false;   // 🏦 conciliación ML ↔ Mercado Pago ↔ banco
+const LS_CONC="ml_conc_v3"; let CONC=loadJSON(LS_CONC,{susc:399,meses:{}}), CONCSEL="", CONCFILES={}, CONCALL=false, CONCD={};   // 🏦 conciliación ML ↔ Mercado Pago ↔ banco
 let REABINFO={win:30,from:'',to:''};   // ventana usada para el reabasto (info para mostrar)
 let REABRANGE=loadJSON(LS_REABRANGE,null);   // rango de fechas manual del reabasto (si lo fija desde la pestaña); null = últimos N días
 let FOTOS=loadJSON(LS_FOTOS,{});   // {sku: url de foto} — se muestra como miniatura; se sincroniza
@@ -477,6 +477,20 @@ function seriesMax(lo,hi){ const set=[...new Set(allKnownSkus().map(x=>''+x).map
 function nextProductNum(){ return nextFree(seriesMax(1,999)+1); }
 function familySuffixes(base){ const all=allKnownSkus().map(x=>''+x); const re=new RegExp('^'+base+'([A-Za-z][A-Za-z0-9]*)$'); const out=new Set(); all.forEach(s=>{ const mm=s.match(re); if(mm) out.add(mm[1]); }); return [...out].sort(); }
 function sugerirSku(){ return ''+nextProductNum(); }
+/* Excel de ventas ML: en paquetes y cambios de talla el DINERO viene en un renglón sin SKU y los productos abajo sin dinero.
+   Reparte ese dinero (solo dinero, no unidades) entre los productos; en un cambio, todo va a la pieza que se quedó la clienta. */
+function salesMoneyFix(rows,m,estadoCol,ventaCol,formaCol){ const out=new Map(); if(!m.clave||!(m.ingreso||m.neto)) return out;
+  const precioCol=m.precio||guess(RAW.headers,['precio unitario']), has=(r,c)=>!!(c&&(''+(r[c]==null?'':r[c])).trim()), money=r=>has(r,m.ingreso)||has(r,m.neto);
+  for(let i=0;i<rows.length;i++){ const h=rows[i]; if(!money(h)||has(h,m.clave)) continue;
+    const kids=[]; let j=i+1; while(j<rows.length&&!money(rows[j])&&has(rows[j],m.clave)&&(!ventaCol||has(rows[j],ventaCol))){ kids.push(rows[j]); j++; }
+    if(!kids.length) continue;
+    const pack=/^paquete de/i.test(estadoCol?(''+(h[estadoCol]||'')).trim():''), hv=ventaCol?(''+(h[ventaCol]||'')).trim():'';
+    const keep=pack?-1:Math.max(0,kids.findIndex(k=>ventaCol&&(''+(k[ventaCol]||'')).trim()===hv));
+    const w=kids.map((k,ix)=>pack?Math.max((precioCol?parseNum(k[precioCol]):0)*(parseNum(k[m.unidades])||1),0.01):(ix===keep?1:0)), W=w.reduce((a,b)=>a+b,0)||1;
+    const v=c=>c?parseNum(h[c]):0;
+    kids.forEach((k,ix)=>{ const f=w[ix]/W; out.set(k,{ing:v(m.ingreso)*f,neto:v(m.neto)*f,com:Math.abs(v(m.comision))*f,env:Math.abs(v(m.envio))*f,keep:!pack&&ix===keep,forma:formaCol?(''+(h[formaCol]||'')).trim():''}); });
+    i=j-1; }
+  return out; }
 function ingestSales(){ if(!RAW||!RAW.rows) return 0; const m=MAPPING; const skCol=m.clave||m.nombre; if(!skCol) return 0;
   let pubCol=''; for(const h of RAW.headers){ for(let i=0;i<Math.min(8,RAW.rows.length);i++){ const v=(RAW.rows[i][h]||'').replace(/\s/g,''); if(/^MLM\d{6,}$/i.test(v)){ pubCol=h; break; } } if(pubCol) break; }
   const estadoCol=guess(RAW.headers,['estado']), anulCol=guess(RAW.headers,['anulaciones','anulación','anulacion','reembolso']);
@@ -485,24 +499,36 @@ function ingestSales(){ if(!RAW||!RAW.rows) return 0; const m=MAPPING; const skC
   const fechaCol=guess(RAW.headers,['fecha de venta','fecha venta','fecha']);
   const formaCol=guess(RAW.headers,['forma de entrega','tipo de entrega','método de envío','metodo de envio','logística','logistica']);
   const seen=new Set(SALES.map(s=>s.k)); const cancelVids=new Set(); let add=0;
-  const seenD=new Set(DEVOL.map(d=>d.k));
+  const seenD=new Set(DEVOL.map(d=>d.k)), FIX=salesMoneyFix(RAW.rows,m,estadoCol,ventaCol,formaCol), byK=new Map(SALES.map(s=>[s.k,s])); let upd=0;
   for(const r of RAW.rows){ const key=(m.clave?r[m.clave]:'')||(m.nombre?r[m.nombre]:'')||''; if(!key) continue;
     const est=(estadoCol?(r[estadoCol]||''):'').toLowerCase(), anul=anulCol?parseNum(r[anulCol]):0;
-    const vid=ventaCol?(''+(r[ventaCol]||'')).trim():'';
-    if(/cancel|devoluci|devuelt|reembols/.test(est)||anul!==0){ if(vid) cancelVids.add(vid+'|'+key);   // marca SOLO ese producto cancelado, no toda la orden (un paquete puede tener otros productos entregados)
-      const du=m.unidades?parseNum(r[m.unidades]):0, dk='D|'+vid+'|'+key+'|'+du+'|'+(anul||0);
-      if(!seenD.has(dk)){ seenD.add(dk); const tipo=/devoluci|devuelt/.test(est)?'devolución':'cancelación';
+    const vid=ventaCol?(''+(r[ventaCol]||'')).trim():'', fx=FIX.get(r); let esDevNow=false;
+    if(fx&&fx.keep){ DEVOL=DEVOL.filter(d=>!(d.vid===vid&&d.sku===key)); }   // cambio de talla: esta pieza SÍ se quedó con la clienta
+    else if(/cancel|devoluci|devuelt|reembols/.test(est)||anul!==0){
+      const du=m.unidades?parseNum(r[m.unidades]):0, dk='D|'+vid+'|'+key+'|'+du+'|'+(anul||0), esDev=/devoluci|devuelt|reembolso al comprador|descartamos/.test(est)&&!/cancel/.test(est);
+      const prevD=DEVOL.find(d=>d.vid===vid&&d.sku===key);
+      if(prevD){ prevD.est=(estadoCol?(''+(r[estadoCol]||'')).trim():'')||prevD.est; prevD.anul=Math.abs(anul||0); }   // misma devolución en otro Excel: se actualiza, no se duplica
+      if(esDev&&vid&&(!prevD||prevD.rec!=='auto')){   // NUEVO: la venta se queda; la pieza regresa solo cuando la marques como recibida
+        if(!prevD){ const motivo=((motivoCol&&(''+(r[motivoCol]||'')).trim())||(resultCol&&(''+(r[resultCol]||'')).trim())||(descCol&&(''+(r[descCol]||'')).trim())||'');
+          DEVOL.push({k:dk,f:parseFechaVenta(fechaCol?r[fechaCol]:''),vid,sku:key,nom:(m.nombre?r[m.nombre]:'')||key,pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''),u:du,anul:Math.abs(anul||0),est:(estadoCol?(''+(r[estadoCol]||'')).trim():''),motivo,tipo:'devolución',rec:/descartamos/.test(est)?'no':null}); seenD.add(dk); }
+        esDevNow=true; }
+      else { if(vid) cancelVids.add(vid+'|'+key);   // marca SOLO ese producto cancelado, no toda la orden (un paquete puede tener otros productos entregados)
+      if(!prevD&&!seenD.has(dk)){ seenD.add(dk); const tipo=/devoluci|devuelt/.test(est)?'devolución':'cancelación';
         const motivo=((motivoCol&&(''+(r[motivoCol]||'')).trim())||(resultCol&&(''+(r[resultCol]||'')).trim())||(descCol&&(''+(r[descCol]||'')).trim())||'');
-        DEVOL.push({k:dk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, nom:(m.nombre?r[m.nombre]:'')||key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), u:du, anul:Math.abs(anul||0), est:(estadoCol?(''+(r[estadoCol]||'')).trim():''), motivo, tipo}); }
-      continue; }
+        DEVOL.push({k:dk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, nom:(m.nombre?r[m.nombre]:'')||key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), u:du, anul:Math.abs(anul||0), est:(estadoCol?(''+(r[estadoCol]||'')).trim():''), motivo, tipo,rec:'auto'}); }
+      continue; } }
     const u=m.unidades?parseNum(r[m.unidades]):0; if(u<=0) continue;
-    const kk='V|'+vid+'|'+key+'|'+u; if(seen.has(kk)) continue; seen.add(kk);
-    const pre=m.precio?parseNum(r[m.precio]):0, ing=m.ingreso?parseNum(r[m.ingreso]):(pre*u);
-    const forma=(formaCol?(''+(r[formaCol]||'')):'').toLowerCase();
-    SALES.push({k:kk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), nom:(m.nombre?r[m.nombre]:'')||key, ubic:forma.includes('full')?'full':'bodega', u, ing, neto:m.neto?parseNum(r[m.neto]):0, com:m.comision?Math.abs(parseNum(r[m.comision])):0, env:m.envio?Math.abs(parseNum(r[m.envio])):0, pre, costo:(m.costo&&r[m.costo]!==''&&r[m.costo]!=null)?parseNum(r[m.costo]):null, stock:(m.stock&&r[m.stock]!==''&&r[m.stock]!=null)?parseNum(r[m.stock]):null});
+    const kk='V|'+vid+'|'+key+'|'+u;
+    if(seen.has(kk)&&!esDevNow&&DEVOL.some(d=>d.vid===vid&&d.sku===key&&d.rec==null)) DEVOL=DEVOL.filter(d=>!(d.vid===vid&&d.sku===key&&d.rec==null));   // ML ya la marca como venta normal: no hay nada que recibir
+    if(seen.has(kk)){ const s0=byK.get(kk); if(fx&&s0&&!(s0.ing>0)&&fx.ing>0){ s0.ing=fx.ing; s0.neto=fx.neto; s0.com=fx.com; s0.env=fx.env; upd++; } continue; }   // completa el dinero de ventas que ya tenías (no toca unidades)
+    seen.add(kk);
+    const pre=m.precio?parseNum(r[m.precio]):0, ing=fx?fx.ing:(m.ingreso?parseNum(r[m.ingreso]):(pre*u));
+    const forma=((formaCol?(''+(r[formaCol]||'')).trim():'')||(fx?fx.forma:'')).toLowerCase();   // en paquetes/cambios la forma de entrega viene en el renglón de arriba
+    if(!esDevNow&&DEVOL.some(d=>d.vid===vid&&d.sku===key&&d.rec!=='si')) DEVOL=DEVOL.filter(d=>!(d.vid===vid&&d.sku===key&&d.rec!=='si'));   // la venta se confirmó (p. ej. la clienta no devolvió): ya no es devolución
+    SALES.push({k:kk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), nom:(m.nombre?r[m.nombre]:'')||key, ubic:forma.includes('full')?'full':'bodega', u, ing, neto:fx?fx.neto:(m.neto?parseNum(r[m.neto]):0), com:fx?fx.com:(m.comision?Math.abs(parseNum(r[m.comision])):0), env:fx?fx.env:(m.envio?Math.abs(parseNum(r[m.envio])):0), pre, costo:(m.costo&&r[m.costo]!==''&&r[m.costo]!=null)?parseNum(r[m.costo]):null, stock:(m.stock&&r[m.stock]!==''&&r[m.stock]!=null)?parseNum(r[m.stock]):null});
     add++; }
   let quit=0; if(cancelVids.size){ const b=SALES.length; SALES=SALES.filter(s=>!cancelVids.has(s.vid+'|'+s.sku)); quit=b-SALES.length; }   // quita solo el producto-línea cancelado, no toda la orden
-  saveJSON(LS_SALES,SALES); saveJSON(LS_DEVOL,DEVOL); return {add,quit:typeof quit==='number'?quit:0,cancel:cancelVids.size}; }
+  saveJSON(LS_SALES,SALES); saveJSON(LS_DEVOL,DEVOL); return {add,quit:typeof quit==='number'?quit:0,cancel:cancelVids.size,upd}; }
 function migrateSku(oldK,newK){ oldK=(''+oldK).trim(); newK=(''+newK).trim(); if(!oldK||!newK||oldK===newK) return false;
   const ren=o=>{ if(o&&Object.prototype.hasOwnProperty.call(o,oldK)){ if(!(newK in o)) o[newK]=o[oldK]; delete o[oldK]; } };
   [BODEGA,FULL,CAMINO,COST,FULLNAME,INVNAME,PUBID,PUBNAME,OVERRIDES].forEach(ren);
@@ -758,7 +784,7 @@ function monthlyStats(){
     let neto; if(s.neto>0) neto=s.neto; else if(s.com||s.env) neto=ing-((s.com||0)+(s.env||0)); else neto=ing-(ing*comPct/100+comFija*s.u+envioU*s.u);
     o.ing+=ing; o.neto+=neto; o.costo+=costoVentaLine(s.pid,s.sku)*s.u; o.uds+=s.u; o.ventas++; }
   const arr=Object.values(by).sort((a,b)=>a.mes<b.mes?-1:1);
-  for(const o of arr){ const emp=empaqueU*o.ventas, g=(typeof mesTotal==='function'?(mesTotal(o.mes,'insumo')+mesTotal(o.mes,'fijo')):0); o.gan=o.neto-o.costo-emp-g; }
+  for(const o of arr){ const emp=empaqueU*o.ventas, g=(typeof mesTotal==='function'?(mesTotal(o.mes,'insumo')+mesTotal(o.mes,'fijo')):0); o.gan=o.neto-o.costo-emp-g-(typeof concExtraMes==='function'?concExtraMes(o.mes):0); }
   return arr;
 }
 function mesChartCard(){
@@ -1240,19 +1266,23 @@ function concMesHtml(M,meses){
     '<p class="foot">Comisión y envío ya se restan en tu Resumen. <b>Publicidad, Full, afiliados y suscripción</b> ('+mxn.format(concExtraMes(M.mes))+') ahora también se restan en la <b>Ganancia NETA</b> del 📊 Resumen.</p></div>'):'';
   const canHtml=M.canceladas.length?('<div class="card"><details><summary style="cursor:pointer;font-weight:600">🟢 '+M.canceladas.length+' ventas canceladas al momento (efecto $0 en tu dinero)</summary><div class="tablewrap" style="max-height:30vh;margin-top:8px"><table><thead><tr><th>Paquete / orden</th><th>Cobro</th><th>Reembolso</th></tr></thead><tbody>'+
     M.canceladas.map(c=>'<tr><td>'+escapeHtml(c[0])+'</td><td>'+mxn2.format(c[1])+'</td><td>'+mxn2.format(c[2])+'</td></tr>').join('')+'</tbody></table></div></details></div>'):'';
-  const viejo=(!M.items||!M.movs)?'<div class="card" style="background:var(--bad-bg);border:2px solid var(--bad)"><h3 class="vh" style="color:var(--bad)">🔄 Este mes se concilió con la versión anterior</h3><p style="margin:0;font-size:14px;line-height:1.6">Para ver <b>tu utilidad real, top 5, productos sin costo, rentabilidad del negocio y el detalle de Mercado Pago</b>, vuelve a subir arriba los reportes de '+concMesNombre(M.mes)+' (los 5 Excel + el PDF de tu estado de cuenta) y dale <b>Conciliar ▸</b>. Tus palomitas se conservan.</p></div>':'';
+  const viejo=(!M.items||!M.movs||(M.items.length&&M.items[0].f===undefined))?'<div class="card" style="background:var(--bad-bg);border:2px solid var(--bad)"><h3 class="vh" style="color:var(--bad)">🔄 Este mes se concilió con la versión anterior</h3><p style="margin:0;font-size:14px;line-height:1.6">Para ver <b>tu utilidad real, top 5, productos sin costo, rentabilidad del negocio y el detalle de Mercado Pago</b>, vuelve a subir arriba los reportes de '+concMesNombre(M.mes)+' (los 5 Excel + el PDF de tu estado de cuenta) y dale <b>Conciliar ▸</b>. Tus palomitas se conservan.</p></div>':'';
   return sel+'<h2 style="margin:6px 0 10px">'+concMesNombre(M.mes)+'</h2>'+viejo+kpHtml+revHtml+concDecisionHtml(M)+retHtml+concBancoHtml(M)+fluHtml+venHtml+cosHtml+canHtml;
 }
 /* ---- 📈 Para decidir: utilidad real por producto (ventas ML − cargos ML − publicidad/Full − costo − empaque) ---- */
 function concItems(rows){ const out=[], P='Precio unitario para venta directa / Precio sugerido para reventa (MXN)'; let i=0;
-  while(i<rows.length){ const h=rows[i]; if(h['Total (MXN)']===''){ i++; continue; }
-    const kids=[]; let j=i+1; while(j<rows.length&&rows[j]['Total (MXN)']===''&&rows[j]['# de venta']){ kids.push(rows[j]); j++; }
-    const lines=kids.length?kids:[h], w=lines.map(r=>Math.max(cNum(r[P])*(cNum(r['Unidades'])||1),0.01)), W=w.reduce((a,b)=>a+b,0);
-    const ing=cNum(h['Ingresos por productos (MXN)']), tot=cNum(h['Total (MXN)']);
+  while(i<rows.length){ const h=rows[i]; if(h['Total (MXN)']===''){ i++; continue; }      // renglones sin dinero (p. ej. "Cambio entregado") no son ventas
+    const kids=[]; let j=i+1;
+    const pack=/^Paquete de/i.test(h['Estado']||''), sinSku=!(h['SKU']||'').trim();
+    if(pack||sinSku) while(j<rows.length&&rows[j]['Total (MXN)']===''&&rows[j]['# de venta']){ kids.push(rows[j]); j++; }   // paquete o cambio: el detalle viene abajo
+    const cambio=!pack&&kids.length>0, keep=cambio?Math.max(0,kids.findIndex(r=>cId(r['# de venta'])===cId(h['# de venta']))):-1;
+    const lines=kids.length?kids:[h], w=lines.map((r,k)=>cambio?(k===keep?1:0):Math.max(cNum(r[P])*(cNum(r['Unidades'])||1),0.01)), W=w.reduce((a,b)=>a+b,0)||1;
+    const ing=cNum(h['Ingresos por productos (MXN)']), tot=cNum(h['Total (MXN)']), cv=cNum(h['Cargo por venta e impuestos (MXN)']), en=cNum(h['Costos de envío (MXN)'])+cNum(h['Ingresos por envío (MXN)']), an=cNum(h['Anulaciones y reembolsos (MXN)']);
     lines.forEach((r,k)=>{ const f=w[k]/W, est=((r['Estado']&&!/^Paquete de/.test(r['Estado']))?r['Estado']:h['Estado'])||'';
-      const c=/cancel/i.test(est)?'can':(!/cambio/i.test(est)&&/reembolso al comprador|Devoluci[oó]n revisada|Devuelto el|Descartamos/i.test(est)?'dev':'ok');
-      out.push({v:cId(h['# de venta']),p:(r['# de publicación']||h['# de publicación']||'').replace(/\s/g,''),s:(r['SKU']||'').trim(),t:r['Título de la publicación']||'',va:(r['Variante']||'').trim(),
-        u:cNum(r['Unidades'])||cNum(h['Unidades'])||1,i:+(ing*f).toFixed(2),n:+(tot*f).toFixed(2),fu:/full/i.test((h['Forma de entrega']||'')+(r['Forma de entrega']||'')),
+      const c=(cambio&&k!==keep)?'cam':(/cancel/i.test(est)?'can':(!/cambio/i.test(est)&&/reembolso al comprador|Devoluci[oó]n revisada|Devuelto el|Descartamos/i.test(est)?'dev':'ok'));
+      out.push({v:cId(h['# de venta']),ov:cId(r['# de venta']),p:(r['# de publicación']||h['# de publicación']||'').replace(/\s/g,''),s:(r['SKU']||'').trim(),t:r['Título de la publicación']||'',va:(r['Variante']||'').trim(),
+        u:cNum(r['Unidades'])||cNum(h['Unidades'])||1,i:+(ing*f).toFixed(2),n:+(tot*f).toFixed(2),cv:+(cv*f).toFixed(2),en:+(en*f).toFixed(2),an:+(an*f).toFixed(2),pr:cNum(r[P]),
+        f:(h['Fecha de venta']||'').replace(/ de 20\d\d/,'').replace(' hs.',''),e:est,fu:/full/i.test((h['Forma de entrega']||'')+(r['Forma de entrega']||'')),
         ad:/s[ií]/i.test((h['Venta por publicidad']||'')+(r['Venta por publicidad']||'')),c,x:/Descartamos/i.test(est)}); });
     i=j; }
   return out; }
@@ -1260,26 +1290,37 @@ function concItems(rows){ const out=[], P='Precio unitario para venta directa / 
 function concDecision(M){
   const cs=M.costos||{}, empU=parseNum($('empaqueU')?$('empaqueU').value:0)||0;
   const ok=M.items.filter(x=>x.c==='ok'), ingOk=ok.reduce((a,x)=>a+x.i,0), uFull=ok.filter(x=>x.fu).reduce((a,x)=>a+x.u,0);
-  const genX=(cs.publicidad||0)+(cs.afil||0)+(M.susc||0), fullX=(cs.fullAlm||0)+(cs.fullCol||0);
-  const P={}, vEmp=new Set();
-  for(const x of M.items){ const k=x.p+'|'+x.s, o=P[k]=P[k]||{p:x.p,s:x.s,t:x.t,va:x.va,u:0,ventas:0,ing:0,neto:0,costo:0,emp:0,ext:0,dev:0,devN:0,ad:0,fu:0,cu:0};
-    o.neto+=x.n; if(x.c==='ok'){ const cu=costoVentaLine(x.p,x.s); o.cu=cu; o.u+=x.u; o.ing+=x.i; o.costo+=cu*x.u; o.ventas++; if(x.ad) o.ad+=x.i; if(x.fu) o.fu+=x.u;
-      o.ext+=(ingOk?genX*x.i/ingOk:0)+(x.fu&&uFull?fullX*x.u/uFull:0);
-      if(!vEmp.has(x.v)){ vEmp.add(x.v); o.emp+=empU; } }
-    else { o.dev++; o.devN+=x.n; if(x.x) o.costo+=costoVentaLine(x.p,x.s)*x.u; } }
-  const L=Object.values(P).map(o=>{ o.cu=o.cu||costoVentaLine(o.p,o.s); o.util=o.neto-o.costo-o.emp-o.ext; o.mg=o.ing>0?o.util/o.ing*100:(o.util<0?-100:0); o.sinCosto=!(o.cu>0); o.nom=(typeof pubTitle==='function'&&o.p&&pubTitle(o.p)!==o.p?pubTitle(o.p):o.t)||o.s; return o; });
+  const adIngAll=ok.filter(x=>x.ad).reduce((a,x)=>a+x.i,0), pubX=cs.publicidad||0, genX=(cs.afil||0)+(M.susc||0)+(adIngAll?0:pubX), fullX=(cs.fullAlm||0)+(cs.fullCol||0);
+  const P={}, SC={}, vEmp=new Set();
+  for(const x of M.items){ const k=x.p||x.s, o=P[k]=P[k]||{k,p:x.p,s:x.s,t:x.t,skus:new Set(),vas:new Set(),u:0,ventas:0,ing:0,neto:0,costo:0,emp:0,ext:0,dev:0,ad:0,fu:0,sinCosto:false,rows:[]};
+    const cu=costoVentaLine(x.p,x.s), r={...x,cu,cost:0,ext:0,emp:0};
+    o.skus.add(x.s); if(x.va&&x.va!=='-') o.vas.add(x.va); o.neto+=x.n;
+    if(x.c==='ok'){ r.cost=cu*x.u; r.ext=(ingOk?genX*x.i/ingOk:0)+(x.ad&&adIngAll?pubX*x.i/adIngAll:0)+(x.fu&&uFull?fullX*x.u/uFull:0); if(!vEmp.has(x.v)){ vEmp.add(x.v); r.emp=empU; }
+      o.u+=x.u; o.ing+=x.i; o.ventas++; if(x.ad) o.ad+=x.i; if(x.fu) o.fu+=x.u;
+      if(!(cu>0)){ o.sinCosto=true; const z=SC[x.s]=SC[x.s]||{s:x.s,p:x.p,t:x.t,va:x.va,u:0,ing:0}; z.u+=x.u; z.ing+=x.i; } }
+    else if(x.c!=='cam'){ o.dev++; if(x.x) r.cost=cu*x.u; }
+    r.util=r.n-r.cost-r.ext-r.emp; o.costo+=r.cost; o.ext+=r.ext; o.emp+=r.emp; o.rows.push(r); }
+  const L=Object.values(P).map(o=>{ o.util=o.neto-o.costo-o.emp-o.ext; o.mg=o.ing>0?o.util/o.ing*100:(o.util<0?-100:0); o.cu=o.u?o.costo/o.u:0;
+    o.nom=(typeof pubTitle==='function'&&o.p&&pubTitle(o.p)!==o.p?pubTitle(o.p):o.t)||o.s;
+    o.va=o.vas.size>1?o.vas.size+' variantes':([...o.vas][0]||''); o.s=o.skus.size>1?[...o.skus][0]+' +'+(o.skus.size-1):[...o.skus][0]; return o; });
   const T=L.reduce((a,o)=>{ a.neto+=o.neto; a.costo+=o.costo; a.emp+=o.emp; a.ext+=o.ext; a.util+=o.util; return a; },{neto:0,costo:0,emp:0,ext:0,util:0});
   const adIng=ok.filter(x=>x.ad).reduce((a,x)=>a+x.i,0);
-  const dv=M.items.filter(x=>x.c!=='ok'), dvLoss=dv.reduce((a,x)=>a+Math.min(x.n,0),0)-dv.filter(x=>x.x).reduce((a,x)=>a+costoVentaLine(x.p,x.s)*x.u,0);
-  const seg=f=>{ const s=L.map(o=>({o,share:o.u?(f?o.fu:o.u-o.fu)/o.u:0})).filter(z=>z.share>0); const ing=s.reduce((a,z)=>a+z.o.ing*z.share,0), ut=s.reduce((a,z)=>a+z.o.util*z.share,0); return {ing,ut,mg:ing?ut/ing*100:0}; };
-  return {L,T,ingOk,ventasOk:new Set(ok.map(x=>x.v)).size,adIng,dv,dvLoss,full:seg(true),agen:seg(false)};
+  const dv=M.items.filter(x=>x.c==='can'||x.c==='dev'), dvLoss=dv.reduce((a,x)=>a+Math.min(x.n,0),0)-dv.filter(x=>x.x).reduce((a,x)=>a+costoVentaLine(x.p,x.s)*x.u,0);
+  const seg=f=>{ const rs=L.flatMap(o=>o.rows).filter(r=>r.c==='ok'&&!!r.fu===f); const ing=rs.reduce((a,r)=>a+r.i,0), ut=rs.reduce((a,r)=>a+r.util,0); return {ing,ut,mg:ing?ut/ing*100:0}; };
+  return {L,T,SC:Object.values(SC),ingOk,ventasOk:new Set(ok.map(x=>x.v)).size,adIng,dv,dvLoss,full:seg(true),agen:seg(false)};
 }
+function concVentasDet(o){
+  const est=r=>r.c==='cam'?'<span class="badge b-blue">Cambio: esta pieza regresó</span>':r.c==='ok'?(/cambio/i.test(r.e)?'<span class="badge b-blue">Cambio: se quedó esta</span>':'<span class="badge b-good">Vendida</span>'):(r.c==='can'?'<span class="badge b-bad">Cancelada</span>':'<span class="badge b-warn">Devuelta</span>');
+  const rs=o.rows.slice().sort((a,b)=>(''+b.v).localeCompare(''+a.v));
+  return '<div style="padding:6px 0 10px"><div class="tablewrap" style="max-height:44vh"><table style="font-size:12px"><thead><tr><th>Fecha</th><th># de venta</th><th>Variante · SKU</th><th>Uds</th><th>Precio</th><th>Vendiste</th><th>Comisión e imp.</th><th>Envío</th><th>Devol./anul.</th><th>Te depositó</th><th>Costo</th><th>Publi. y Full</th><th>Utilidad</th><th></th></tr></thead><tbody>'+
+    rs.map(r=>'<tr><td style="white-space:nowrap">'+escapeHtml(r.f||'')+'</td><td>'+escapeHtml(r.v)+(r.ad?' <span title="Venta por publicidad">📣</span>':'')+(r.fu?' <span title="Full">⚡</span>':'')+'</td><td style="white-space:normal;max-width:180px">'+escapeHtml((r.va&&r.va!=='-'?r.va.replace(/[^|:]+:\s*/g,'').replace(/\s*\|\s*/g,' | ')+' · ':'')+r.s)+'</td><td>'+num.format(r.u)+'</td><td>'+mxn2.format(r.pr)+'</td><td>'+mxn2.format(r.i)+'</td><td class="neg">'+mxn2.format(r.cv)+'</td><td class="'+(r.en<0?'neg':'')+'">'+mxn2.format(r.en)+'</td><td class="'+(r.an<0?'neg':'')+'">'+(r.an?mxn2.format(r.an):'—')+'</td><td><b>'+mxn2.format(r.n)+'</b></td><td class="neg">'+(r.cost?'−'+mxn2.format(r.cost):(r.c==='ok'?'<span class="badge b-warn">sin costo</span>':'—'))+'</td><td class="neg">'+(r.ext?'−'+mxn2.format(r.ext):'—')+'</td><td class="'+(r.util<0?'neg':'pos')+'"><b>'+mxn2.format(r.util)+'</b></td><td>'+est(r)+'</td></tr>').join('')+
+    '</tbody></table></div><p class="hint" style="margin:4px 0 0">Utilidad = Te depositó − Costo − Publicidad y Full'+(o.emp?' − Empaque':'')+'. 📣 = llegó por publicidad · ⚡ = Full. Una venta devuelta o cancelada no lleva costo (el producto regresa) pero sí lo que ML no te devolvió.</p></div>'; }
 
 function concDecisionHtml(M){
-  if(!M.items) return '<div class="card"><p class="hint" style="margin:0">📈 Para ver tu utilidad real por producto, vuelve a darle <b>Conciliar ▸</b> a este mes con sus reportes.</p></div>';
+  if(!M.items||(M.items.length&&M.items[0].f===undefined)) return '<div class="card"><p class="hint" style="margin:0">📈 Para ver tu utilidad real por producto, vuelve a darle <b>Conciliar ▸</b> a este mes con sus reportes.</p></div>';
   const D=concDecision(M), T=D.T, cs=M.costos||{}, ml=D.ingOk-T.neto, mlPct=D.ingOk?(ml+T.ext)/D.ingOk*100:0, mg=D.ingOk?T.util/D.ingOk*100:0;
   const conCosto=D.L.filter(o=>o.u>0&&!o.sinCosto), top=conCosto.slice().sort((a,b)=>b.util-a.util).slice(0,5), pierden=D.L.filter(o=>o.util<-0.5).sort((a,b)=>a.util-b.util);
-  const sinC=D.L.filter(o=>o.u>0&&o.sinCosto), bajos=conCosto.filter(o=>o.util>=0&&o.mg<10&&o.u>=2).sort((a,b)=>a.mg-b.mg);
+  const sinC=D.SC, bajos=conCosto.filter(o=>o.util>=0&&o.mg<10&&o.u>=2).sort((a,b)=>a.mg-b.mg);
   const topShare=T.util>0?top.reduce((a,o)=>a+o.util,0)/T.util*100:0, pub=cs.publicidad||0, acos=D.adIng?pub/D.adIng*100:0, roas=pub?D.adIng/pub:0;
   const mgAntesAds=D.ingOk?(T.util+pub)/D.ingOk*100:0;
   const nm=o=>escapeHtml(o.nom)+(o.va&&o.va!=='-'?' <span style="color:var(--muted);font-size:12px">'+escapeHtml(o.va)+'</span>':'');
@@ -1302,15 +1343,16 @@ function concDecisionHtml(M){
   if(D.full.ing&&D.agen.ing) ins.push('🚚 Full deja <b>'+D.full.mg.toFixed(1)+'%</b> de margen vs <b>'+D.agen.mg.toFixed(1)+'%</b> por agencia/punto de despacho'+(D.full.mg>=D.agen.mg?' → Full te conviene.':' → revisa qué productos sí vale la pena tener en Full.'));
   if(D.dv.length) ins.push('↩️ <b>'+new Set(D.dv.map(x=>x.v)).size+'</b> ventas canceladas o devueltas te costaron <b>'+mxn.format(-D.dvLoss)+'</b> (envíos y cargos que no regresan'+(D.dv.some(x=>x.x)?' + producto descartado':'')+').');
   if(bajos.length) ins.push('🟡 <b>'+bajos.length+'</b> '+(bajos.length===1?'producto gana':'productos ganan')+' menos del 10%: '+bajos.slice(0,3).map(o=>escapeHtml(o.nom.slice(0,40))+' ('+o.mg.toFixed(0)+'%)').join(', ')+(bajos.length>3?'…':'')+'. Candidatos a subir precio.');
-  if(sinC.length) ins.push('⚠️ <b>'+sinC.length+'</b> '+(sinC.length===1?'producto vendido no tiene':'productos vendidos no tienen')+' costo capturado ('+sinC.slice(0,3).map(o=>escapeHtml(o.s||o.nom.slice(0,25))).join(', ')+(sinC.length>3?'…':'')+'). Captúralo en 📦 Inventario para que tu utilidad sea exacta.');
+  if(sinC.length) ins.push('⚠️ <b>'+sinC.length+'</b> '+(sinC.length===1?'producto vendido no tiene':'productos vendidos no tienen')+' costo capturado ('+sinC.slice(0,3).map(o=>escapeHtml(o.s||(o.t||'').slice(0,25))).join(', ')+(sinC.length>3?'…':'')+'). Captúralo en 📦 Inventario para que tu utilidad sea exacta.');
   const insHtml='<div class="card"><h3 class="vh">💡 Lo que dicen tus números</h3><ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.8">'+ins.map(s=>'<li>'+s+'</li>').join('')+'</ul></div>';
-  const row=o=>'<tr><td class="prod" style="max-width:340px">'+(typeof fotoThumb==='function'?fotoThumb(o.s):'')+nm(o)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(o.s)+'</span></td><td>'+num.format(o.u)+'</td><td>'+mxn.format(o.ing)+'</td><td>'+(o.sinCosto?'<span class="badge b-warn">sin costo</span>':mxn.format(o.cu))+'</td><td class="'+(o.util<0?'neg':'pos')+'"><b>'+mxn.format(o.util)+'</b></td><td class="'+(o.mg<0?'m-bad':o.mg<10?'m-warn':'m-good')+'">'+o.mg.toFixed(0)+'%</td><td>'+(o.u?mxn.format(o.util/o.u):'—')+'</td></tr>';
+  CONCD={}; D.L.forEach(o=>CONCD[o.k]=o);
+  const row=o=>'<tr class="concProd" data-k="'+escapeHtml(o.k)+'" style="cursor:pointer" title="Pícale para ver venta por venta"><td class="prod" style="max-width:340px">'+(typeof fotoThumb==='function'?fotoThumb([...o.skus][0]):'')+'<span class="concArr">▸</span> '+nm(o)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(o.s)+' · '+o.ventas+' ventas'+(o.dev?' · '+o.dev+' devueltas/canceladas':'')+'</span></td><td>'+num.format(o.u)+'</td><td>'+mxn.format(o.ing)+'</td><td>'+(o.sinCosto?'<span class="badge b-warn">sin costo</span>':mxn.format(o.cu))+'</td><td class="'+(o.util<0?'neg':'pos')+'"><b>'+mxn.format(o.util)+'</b></td><td class="'+(o.mg<0?'m-bad':o.mg<10?'m-warn':'m-good')+'">'+o.mg.toFixed(0)+'%</td><td>'+(o.u?mxn.format(o.util/o.u):'—')+'</td></tr><tr class="concDetRow hide"><td colspan="7" style="background:var(--bg)"></td></tr>';
   const th='<thead><tr><th>Producto</th><th>Vendidos</th><th>Vendiste</th><th>Costo c/u</th><th>Utilidad real</th><th>Margen</th><th>Te deja c/u</th></tr></thead>';
   const topHtml='<div class="card"><h3 class="vh">🏆 Top 5 que más utilidad te dejan</h3><div class="tablewrap"><table>'+th+'<tbody>'+(top.length?top.map(row).join(''):'<tr><td colspan="7" class="hint">Captura costos para ver tu top.</td></tr>')+'</tbody></table></div></div>';
   const pierHtml='<div class="card" style="'+(pierden.length?'border:1px solid rgba(214,69,69,.35)':'')+'"><h3 class="vh">'+(pierden.length?'🚨 Productos que te hicieron perder dinero':'🔻 Productos que menos te dejan')+'</h3>'+(pierden.length?'<div class="tablewrap"><table>'+th+'<tbody>'+pierden.map(row).join('')+'</tbody></table></div><p class="hint" style="margin:6px 0 0">Incluye lo que perdiste por devoluciones/cancelaciones de ese producto y su parte de publicidad y Full.</p>':('<p class="hint" style="margin:0 0 8px">✅ Ninguno este mes. Estos son los que <b>menos margen</b> te dejan — vigílalos:</p><div class="tablewrap"><table>'+th+'<tbody>'+conCosto.slice().sort((a,b)=>a.mg-b.mg).slice(0,5).map(row).join('')+'</tbody></table></div>'))+'</div>';
-  const allHtml='<div class="card"><details><summary style="cursor:pointer;font-weight:600">📋 Utilidad de todos tus productos ('+D.L.length+')</summary><div class="tablewrap" style="max-height:55vh;margin-top:8px"><table>'+th+'<tbody>'+D.L.slice().sort((a,b)=>b.util-a.util).map(row).join('')+'</tbody></table></div><p class="hint" style="margin:6px 0 0">Publicidad, afiliados y suscripción se reparten según lo que vendió cada producto; el costo de Full, según las piezas que salieron por Full.</p></details></div>';
+  const allHtml='<div class="card"><details><summary style="cursor:pointer;font-weight:600">📋 Utilidad de todos tus productos ('+D.L.length+') <span style="font-weight:400;color:var(--muted);font-size:12px">— pícale a cualquiera para ver venta por venta</span></summary><div class="tablewrap" style="max-height:55vh;margin-top:8px"><table>'+th+'<tbody>'+D.L.slice().sort((a,b)=>b.util-a.util).map(row).join('')+'</tbody></table></div><p class="hint" style="margin:6px 0 0">La publicidad se reparte solo entre las ventas que llegaron por anuncio (📣); afiliados y suscripción, según lo que vendió cada producto; el costo de Full, según las piezas que salieron por Full.</p></details></div>';
   const sinHtml=sinC.length?('<div class="card" style="border:1px solid rgba(217,138,0,.4)"><h3 class="vh">⚠️ Vendiste estos productos y no tienen costo capturado</h3><p class="hint" style="margin:0 0 8px">Mientras no tengan costo, su utilidad sale inflada. Captúralo en <b>📦 Inventario</b> (o en tu hoja de inventario). Si es un kit/paquete, arma su receta en <b>🧩 Kits / Recetas</b> con las piezas que lleva.</p><div class="tablewrap"><table><thead><tr><th>SKU</th><th>Producto</th><th>Publicación</th><th>Vendidos</th><th>Vendiste</th></tr></thead><tbody>'+
-    sinC.sort((a,b)=>b.ing-a.ing).map(o=>'<tr><td><b>'+escapeHtml(o.s||'(sin SKU)')+'</b></td><td class="prod" style="max-width:340px">'+nm(o)+'</td><td>'+escapeHtml(o.p)+'</td><td>'+num.format(o.u)+'</td><td>'+mxn.format(o.ing)+'</td></tr>').join('')+'</tbody></table></div></div>'):'';
+    sinC.sort((a,b)=>b.ing-a.ing).map(o=>'<tr><td><b>'+escapeHtml(o.s||'(sin SKU)')+'</b></td><td class="prod" style="max-width:340px">'+escapeHtml(o.t)+(o.va&&o.va!=='-'?' <span style="color:var(--muted);font-size:12px">'+escapeHtml(o.va)+'</span>':'')+'</td><td>'+escapeHtml(o.p)+'</td><td>'+num.format(o.u)+'</td><td>'+mxn.format(o.ing)+'</td></tr>').join('')+'</tbody></table></div></div>'):'';
   return pyl+concNegocioHtml(M,D)+insHtml+sinHtml+topHtml+pierHtml+allHtml;
 }
 /* ---- 🏦 Estado de cuenta del banco (PDF): retiros de MP, comisiones, contadora, SAT ---- */
@@ -1375,6 +1417,7 @@ function concBancoHtml(M){ const B=CONC.banco&&CONC.banco[M.mes];
 function concNegocioHtml(M,D){ const B=CONC.banco&&CONC.banco[M.mes], fij=mesTotal(M.mes,'fijo'), ins=mesTotal(M.mes,'insumo');
   const sat=B?B.movs.filter(mv=>mv.t==='car'&&mv.c==='sat').reduce((a,mv)=>a+mv.m,0):0, pers=B?B.movs.filter(mv=>mv.t==='car'&&mv.c==='pers').reduce((a,mv)=>a+mv.m,0):0;
   const sinC=B?B.movs.filter(mv=>mv.t==='car'&&!mv.c):[], antes=D.T.util-fij-ins, neta=antes-sat, mg=D.ingOk?neta/D.ingOk*100:0;
+  const dupG=B?(GASTOSMES[M.mes]||[]).filter(g=>!g.src&&/contad|banco|comisi|suscrip/i.test(g.c||'')):[];
   const det=(GASTOSMES[M.mes]||[]).filter(g=>parseNum(g.m)).map(g=>escapeHtml(g.c||'(sin nombre)')+' '+mxn.format(parseNum(g.m))).join(' · ');
   return '<div class="card" style="border:2px solid var(--accent)"><h3 class="vh">🏢 Rentabilidad de tu negocio (Mercado Libre) — '+concMesNombre(M.mes)+'</h3><div class="funnel">'+
     '<div class="line"><span>Utilidad real de Mercado Libre</span><b>'+mxn.format(D.T.util)+'</b></div>'+
@@ -1383,7 +1426,7 @@ function concNegocioHtml(M,D){ const B=CONC.banco&&CONC.banco[M.mes], fij=mesTot
     '<div class="line"><span>= Utilidad antes de impuestos</span><b>'+mxn.format(antes)+'</b></div>'+
     '<div class="line"><span>− Impuestos pagados al SAT este mes</span><b class="neg">−'+mxn.format(sat)+'</b></div>'+
     '<div class="line big"><span>💰 Utilidad NETA del negocio · '+mg.toFixed(1)+'% de tus ventas</span><b class="'+(neta>=0?'pos':'neg')+'">'+mxn.format(neta)+'</b></div></div>'+
-    '<p class="foot">'+(B?'':'⚠️ Sube tu estado de cuenta para sumar banco, contadora e impuestos. ')+(!fij&&!B?'No tienes gastos fijos capturados para este mes. ':'')+
+    '<p class="foot">'+(dupG.length?'<b style="color:var(--bad)">⚠️ Puede haber gasto doble: además del estado de cuenta tienes capturado a mano '+dupG.map(g=>'"'+escapeHtml(g.c)+'"').join(', ')+'. Si es lo mismo, bórralo en Gastos del mes (📊 Resumen). </b>':'')+(B?'':'⚠️ Sube tu estado de cuenta para sumar banco, contadora e impuestos. ')+(!fij&&!B?'No tienes gastos fijos capturados para este mes. ':'')+
     (sinC.length?'<b style="color:var(--warn)">❓ Tienes '+sinC.length+' cargos del banco sin clasificar ('+mxn.format(sinC.reduce((a,mv)=>a+mv.m,0))+'): clasifícalos abajo. </b>':'')+
     (pers?'No conté '+mxn.format(pers)+' de gastos personales. ':'')+(M.reten?'Ojo: ML ya te retuvo '+mxn.format(M.reten)+' de ISR/IVA que se acreditan contra esos impuestos. ':'')+'No incluye Amazon.</p></div>'; }
 function renderConc(){ const v=$('view-conc'); if(!v) return; CONC=loadJSON(LS_CONC,CONC); CONC.meses=CONC.meses||{};
@@ -1398,12 +1441,19 @@ async function concLoadFiles(files){ const msg=$('concMsg'); const raros=[];
   if(oks.length&&!Object.keys(CONCFILES).some(t=>t!=='banco')){ renderConc(); renderResumen(); }
   else $('concFileList').innerHTML=concFileListHtml();
   const m2=$('concMsg'); if(m2) m2.innerHTML=oks.join('<br>')+(oks.length&&raros.length?'<br>':'')+(raros.length?('ℹ️ Estos no los necesito (o no los reconocí): '+raros.map(escapeHtml).join(', ')):''); }
+function concNutreVentas(M){ if(!M||!M.items||!SALES||!SALES.length) return 0; const idx=new Map(); let n=0;
+  for(const s of SALES){ const k=s.vid+'|'+s.sku; if(!idx.has(k)) idx.set(k,[]); idx.get(k).push(s); }
+  for(const x of M.items){ if(x.c!=='ok'||!x.ov) continue; const arr=idx.get(x.ov+'|'+x.s); if(!arr) continue;
+    for(const s of arr){ if(!(s.ing>0)&&x.i>0){ s.ing=x.i; s.neto=x.n; s.com=Math.abs(x.cv); s.env=Math.max(0,-x.en); n++; } } }
+  if(n){ saveJSON(LS_SALES,SALES); if(typeof aggregate==='function'){ aggregate(); refresh(); } }
+  return n; }
 function concRun(){ const msg=$('concMsg'), falta=['ventas','trans','lib','ret'].filter(t=>!CONCFILES[t]);
   if(falta.length){ msg.innerHTML='⚠️ Me falta: <b>'+falta.map(t=>CONC_TIPOS[t]).join(', ')+'</b>'; return; }
   try{ const F={}; for(const t in CONCFILES){ if(CONCFILES[t].rows) F[t]=cTable(CONCFILES[t].rows,CONC_MARK[t]); }
     const M=concCompute(F); if(!M.mes) throw new Error('no pude leer el mes del reporte de Liberaciones');
     if(CONC.meses[M.mes]&&!confirm('Ya tienes conciliado '+concMesNombre(M.mes)+'. ¿Lo reemplazo con estos reportes? (tus palomitas del banco se conservan)')) return;
-    CONC.meses[M.mes]=M; CONCSEL=M.mes; CONCFILES={}; concMatchBanco(M.mes); concSave(); renderConc(); renderResumen();
+    CONC.meses[M.mes]=M; CONCSEL=M.mes; CONCFILES={}; concMatchBanco(M.mes); concSave(); const nv=concNutreVentas(M); renderConc(); renderResumen();
+    if(nv){ const mm=$('concMsg'); if(mm) mm.innerHTML='✅ Además completé el dinero de <b>'+nv+'</b> ventas de paquetes que tu ERP tenía en $0 (Resumen y Rentabilidad ya lo usan).'; }
   }catch(e){ console.error(e); msg.innerHTML='⚠️ No pude conciliar: '+escapeHtml(e.message||e); } }
 $('view-conc').addEventListener('change',e=>{
   if(e.target.id==='concFiles') concLoadFiles([...e.target.files]);
@@ -1415,8 +1465,76 @@ $('view-conc').addEventListener('change',e=>{
 $('view-conc').addEventListener('click',e=>{
   if(e.target.id==='concRun') return concRun();
   if(e.target.id==='concAll'){ CONCALL=!CONCALL; return renderConc(); }
+  const cp=e.target.closest('.concProd'); if(cp){ const det=cp.nextElementSibling, o=CONCD[cp.dataset.k]; if(det&&o){ if(!det.dataset.ok){ det.firstElementChild.innerHTML=concVentasDet(o); det.dataset.ok='1'; } det.classList.toggle('hide'); const ar=cp.querySelector('.concArr'); if(ar) ar.textContent=det.classList.contains('hide')?'▸':'▾'; } return; }
   const mb=e.target.closest('.concMes'); if(mb){ CONCSEL=mb.dataset.m; CONCALL=false; return renderConc(); }
   if(e.target.id==='concDel'&&CONCSEL&&confirm('¿Borrar la conciliación de '+concMesNombre(CONCSEL)+'?')){ delete CONC.meses[CONCSEL]; CONCSEL=''; concSave(); renderConc(); renderResumen(); } });
+
+/* ---------- FASE 1: devoluciones por recibir, recetas congeladas, radar ---------- */
+function ultVentaML(){ let m=''; for(const s of SALES){ if(s.f&&s.f>m) m=s.f; } return m; }
+function ultMovFecha(fn){ let m=''; for(const x of MOVS){ if(fn(x)&&x.fecha&&x.fecha>m) m=x.fecha; } return m; }
+function diasDesde(f){ if(!f) return null; return Math.max(0,Math.round((new Date(hoy()+'T00:00:00')-new Date(f+'T00:00:00'))/864e5)); }
+function fechaBonita(f){ if(!f) return '—'; const d=new Date(f+'T12:00:00'); return d.toLocaleDateString('es-MX',{day:'numeric',month:'short'}); }
+
+/* ↩️ Devoluciones por recibir: la venta queda (−1) y la pieza entra (+1) solo cuando Vivis confirma que la recibió */
+function devolPend(){ return DEVOL.filter(d=>d.tipo==='devolución'&&d.rec==null); }
+function devolUbic(d){ const s=SALES.find(x=>x.vid===d.vid&&x.sku===d.sku); return (s&&s.ubic)||'bodega'; }
+function devolPiezas(d,dest){ const u=parseNum(d.u)||1; if(dest==='full') return fullSkus(d.sku,d.pid).map(s=>({sku:s,q:u})); return recetaForEnvio(d.sku,d.pid).map(c=>({sku:c.sku,q:u*(parseNum(c.qty)||1)})); }
+function devolRecibir(k,dest){ const d=DEVOL.find(x=>x.k===k); if(!d) return;
+  for(const c of devolPiezas(d,dest)) addMov({tipo:'Devolución recibida',sku:c.sku,ubic:dest,entrada:c.q,nota:'devol',ref:d.vid});
+  d.rec='si'; d.recF=hoy(); d.recUbic=dest; saveJSON(LS_DEVOL,DEVOL); saveMovs(); recomputeLive(); afterMov(); }
+function devolNoRegreso(k){ const d=DEVOL.find(x=>x.k===k); if(!d) return; d.rec='no'; d.recF=hoy(); saveJSON(LS_DEVOL,DEVOL); afterMov(); }
+function devolDeshacer(k){ const d=DEVOL.find(x=>x.k===k); if(!d) return;
+  if(d.rec==='si') MOVS=MOVS.filter(m=>!(m.nota==='devol'&&m.ref===d.vid&&m.fecha===d.recF&&devolPiezas(d,d.recUbic).some(c=>c.sku===m.sku)));
+  d.rec=null; delete d.recF; delete d.recUbic; saveJSON(LS_DEVOL,DEVOL); saveMovs(); recomputeLive(); afterMov(); }
+function devolRecHtml(){ const P=devolPend().sort((a,b)=>(''+b.f).localeCompare(''+a.f)), H=DEVOL.filter(d=>d.tipo==='devolución'&&(d.rec==='si'||d.rec==='no')).sort((a,b)=>(''+b.recF).localeCompare(''+a.recF)).slice(0,60);
+  const row=d=>{ const ub=devolUbic(d); return '<tr><td style="white-space:nowrap">'+escapeHtml(fechaCorta?fechaCorta(d.f):d.f)+'</td><td>'+escapeHtml(d.vid)+'</td><td class="prod" style="max-width:300px;white-space:normal">'+(typeof fotoThumb==='function'?fotoThumb(d.sku):'')+escapeHtml(d.nom||d.sku)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(d.sku)+'</span></td><td>'+num.format(parseNum(d.u)||1)+'</td><td style="white-space:normal;max-width:220px;font-size:12px">'+escapeHtml(d.est||'')+'</td>'+
+    '<td><select class="devDest" data-k="'+escapeHtml(d.k)+'"><option value="bodega"'+(ub!=='full'?' selected':'')+'>🏠 Bodega</option><option value="full"'+(ub==='full'?' selected':'')+'>⚡ Full</option></select></td>'+
+    '<td style="white-space:nowrap"><button class="btn sm devOk" data-k="'+escapeHtml(d.k)+'">✔️ Lo recibí</button> <button class="btn ghost sm devNo" data-k="'+escapeHtml(d.k)+'" title="No regresó, llegó dañada o ML la descartó">✖️ No regresó</button></td></tr>'; };
+  return '<div class="card" style="'+(P.length?'border:2px solid var(--warn);background:var(--warn-bg)':'')+'"><h3 class="vh">📥 Devoluciones por recibir'+(P.length?' ('+P.length+')':'')+'</h3>'+
+    '<p class="hint" style="margin:0 0 8px">La venta se queda descontada. Cuando la pieza <b>de verdad llegue</b> (a tu casa o a Full), dale <b>✔️ Lo recibí</b> y entra a tu inventario. Si ML la descartó o no regresó, dale <b>✖️</b> y no entra nada.</p>'+
+    (P.length?'<div class="tablewrap" style="max-height:46vh"><table><thead><tr><th>Fecha</th><th># de venta</th><th>Producto</th><th>Uds</th><th>Estado en ML</th><th>¿A dónde llegó?</th><th></th></tr></thead><tbody>'+P.map(row).join('')+'</tbody></table></div>':'<p class="hint" style="margin:0">✅ No tienes devoluciones pendientes de recibir.</p>')+
+    (H.length?'<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:600">Ya procesadas ('+H.length+')</summary><div class="tablewrap" style="max-height:30vh;margin-top:6px"><table><thead><tr><th>Procesada</th><th># de venta</th><th>Producto</th><th>Resultado</th><th></th></tr></thead><tbody>'+
+      H.map(d=>'<tr><td>'+escapeHtml(d.recF||'')+'</td><td>'+escapeHtml(d.vid)+'</td><td style="white-space:normal">'+escapeHtml(d.nom||d.sku)+'</td><td>'+(d.rec==='si'?'✔️ Entró a '+(d.recUbic==='full'?'Full':'bodega'):'✖️ No regresó')+'</td><td><button class="btn ghost sm devUndo" data-k="'+escapeHtml(d.k)+'">Deshacer</button></td></tr>').join('')+'</tbody></table></div></details>':'')+'</div>'; }
+(function(){ const _rd=renderDevol; renderDevol=function(){ _rd(); const v=$('view-devol'); if(!v) return; let b=$('devolRecBox'); if(!b){ b=document.createElement('div'); b.id='devolRecBox'; v.insertBefore(b,v.firstChild); } b.innerHTML=devolRecHtml(); }; })();
+$('view-devol').addEventListener('click',e=>{ const b=e.target.closest('.devOk,.devNo,.devUndo'); if(!b) return; const k=b.dataset.k;
+  if(b.classList.contains('devOk')){ const sel=[...document.querySelectorAll('.devDest')].find(s=>s.dataset.k===k); devolRecibir(k,sel?sel.value:'bodega'); }
+  else if(b.classList.contains('devNo')) devolNoRegreso(k); else devolDeshacer(k); });
+
+/* 🧾 Recetas "a partir de hoy": cada venta guarda las piezas que descontó; botón para aplicar recetas nuevas a ventas pasadas */
+function recetasAplicarPasado(){ if(!confirm('Esto recalcula TODAS tus ventas desde tu fecha de corte con las recetas que tienes HOY. Úsalo solo si corregiste una receta que estaba mal desde el principio. ¿Continuar?')) return;
+  let n=0; for(const s of SALES){ if(s.rc||s.fs){ delete s.rc; delete s.fs; n++; } } saveJSON(LS_SALES,SALES); generateSalesMovements(); afterMov(); alert('✅ Recalculé '+n+' ventas con tus recetas actuales.'); }
+(function(){ const _rr=renderRecetas; renderRecetas=function(){ _rr(); const v=$('view-recetas'); if(!v) return; let b=$('recPasadoBox'); if(!b){ b=document.createElement('div'); b.id='recPasadoBox'; v.appendChild(b); }
+  b.innerHTML='<div class="card" style="background:var(--bg)"><h3 class="vh">🧾 Las recetas aplican a partir de hoy</h3><p class="hint" style="margin:0 0 8px">Si cambias una receta, solo afecta las ventas <b>nuevas</b>; lo que ya vendiste se queda como se descontó. Si corregiste una receta que estaba <b>mal desde el principio</b> y quieres arreglar el pasado, usa este botón.</p><button class="btn ghost sm" id="recPasadoBtn">♻️ Aplicar recetas actuales a ventas pasadas</button></div>'; }; })();
+$('view-recetas').addEventListener('click',e=>{ if(e.target.id==='recPasadoBtn') recetasAplicarPasado(); });
+
+/* 🧭 Radar del negocio (Resumen): datos viejos, se agotan pronto, dinero parado, devoluciones por recibir */
+function radarHtml(){ const C=(COMPUTED||[]).filter(p=>!HIDDEN.has(p.key)), uv=ultVentaML(), dv=diasDesde(uv), uf=ultMovFecha(m=>m.nota==='cuadre'), ua=ultMovFecha(m=>/amazon/i.test(m.tipo||'')&&(m.salida||0)>0&&m.nota!=='cuadre-amz');
+  const fr=[['🛒 Ventas ML cargadas hasta',uv,dv,3],['⚡ Último cuadre de Full',uf,diasDesde(uf),30],['📦 Última venta Amazon registrada',ua,diasDesde(ua),15]].map(([l,f,d,lim])=>'<span class="badge '+(d==null?'b-warn':d>lim?'b-bad':'b-good')+'" style="margin:2px">'+l+': <b>'+(f?fechaBonita(f)+' (hace '+d+' d)':'sin datos')+'</b></span>').join(' ');
+  const ag=C.filter(p=>p.inv&&p.total>0&&p.velDia>0&&isFinite(p.covTotal)&&p.covTotal<=21).sort((a,b)=>a.covTotal-b.covTotal).slice(0,8);
+  const agF=C.filter(p=>p.inv&&p.full>0&&p.velDiaFull>0&&isFinite(p.covFull)&&p.covFull<=10).sort((a,b)=>a.covFull-b.covFull).slice(0,6);
+  const neg=C.filter(p=>p.inv&&((p.bodega||0)<0||(p.full||0)<0)).sort((a,b)=>Math.min(a.bodega,a.full)-Math.min(b.bodega,b.full));
+  const par=C.filter(p=>(p.total||0)>0&&(p.valorInv||0)>0&&((p.velUdsAll||0)<=0||(isFinite(p.covAll)&&p.covAll>=150))), parT=par.reduce((a,p)=>a+p.valorInv,0), parTop=par.slice().sort((a,b)=>b.valorInv-a.valorInv).slice(0,6), invT=C.reduce((a,p)=>a+(p.valorInv||0),0);
+  const dp=devolPend().length, fin=d=>{ const x=new Date(); x.setDate(x.getDate()+Math.floor(d)); return x.toLocaleDateString('es-MX',{day:'numeric',month:'short'}); };
+  const it=(p,der)=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px"><span style="min-width:0">'+escapeHtml((p.nombre||p.key||'').slice(0,48))+' <span style="color:var(--muted);font-size:11px">'+escapeHtml(p.key)+'</span></span><span style="white-space:nowrap;text-align:right">'+der+'</span></div>';
+  const col=(t,body)=>'<div style="min-width:0"><b style="font-size:13px">'+t+'</b><div style="margin-top:4px">'+body+'</div></div>';
+  return '<div class="card"><h3 class="vh">🧭 Radar de tu negocio</h3><div style="margin-bottom:8px">'+fr+'</div>'+
+    (dv!=null&&dv>3?'<p class="hint" style="margin:0 0 8px;color:var(--bad)">⚠️ Tus ventas de ML tienen '+dv+' días sin actualizarse: tu bodega se ve con más piezas de las que tienes. Sube tu Excel de ventas antes de decidir o cuadrar.</p>':'')+
+    (dp?'<p style="margin:0 0 8px"><span class="badge b-warn">📥 '+dp+' '+(dp===1?'devolución':'devoluciones')+' por recibir</span> → revísalas en ↩️ Devoluciones.</p>':'')+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">'+
+    col('⏳ Se te acaban pronto (≤ 21 días, bodega + Full)', ag.length?ag.map(p=>it(p,num.format(p.total)+' uds · <b class="'+(p.covTotal<=7?'neg':'')+'">~'+Math.max(1,Math.round(p.covTotal))+' d</b> <span style="color:var(--muted)">('+fin(p.covTotal)+')</span>')).join(''):'<p class="hint" style="margin:0">✅ Nada se agota en las próximas 3 semanas.</p>')+
+    col('⚡ En Full se acaban en ≤ 10 días', agF.length?agF.map(p=>it(p,num.format(p.full)+' en Full · <b class="neg">~'+Math.max(1,Math.round(p.covFull))+' d</b>')).join('')+'<p class="hint" style="margin:4px 0 0">Mándalos a Full desde 🔻 Reabasto.</p>':'<p class="hint" style="margin:0">✅ Tu Full aguanta más de 10 días.</p>')+
+    col('💤 Dinero parado (sin venta o +150 días de inventario)','<div style="font-size:22px;font-weight:700;color:var(--warn);margin:2px 0 4px">'+mxn.format(parT)+' <span style="font-size:12px;color:var(--muted);font-weight:400">'+(invT?(parT/invT*100).toFixed(0)+'% de tu inventario · ':'')+par.length+' productos</span></div>'+parTop.map(p=>it(p,num.format(p.total)+' uds · <b>'+mxn.format(p.valorInv)+'</b>')).join('')+(parTop.length?'<p class="hint" style="margin:4px 0 0">Candidatos a promoción, kit o liquidar para recuperar efectivo.</p>':''))+
+    (neg.length?col('🔴 Inventario en negativo ('+neg.length+') — señal de desfase',neg.slice(0,8).map(p=>it(p,((p.bodega||0)<0?'bodega <b class="neg">'+num.format(p.bodega)+'</b> ':'')+((p.full||0)<0?'Full <b class="neg">'+num.format(p.full)+'</b>':''))).join('')+'<p class="hint" style="margin:4px 0 0">Algo no se registró (entrada, kit o devolución). Cuéntalos y haz un ajuste en 📒 Movimientos.</p>'):'')+
+    '</div></div>'; }
+(function(){ const _rs=renderResumen; renderResumen=function(){ _rs(); const v=$('view-resumen'); if(!v) return; let b=$('radarBox'); if(!b){ b=document.createElement('div'); b.id='radarBox'; } const bar=v.firstElementChild; if(bar&&bar.nextSibling) v.insertBefore(b,bar.nextSibling); else v.prepend(b); try{ b.innerHTML=radarHtml(); }catch(e){ console.error(e); b.innerHTML=''; } }; })();
+
+/* 🔄 Antes de cuadrar Full/Amazon: avisar si las ventas cargadas están atrasadas */
+(function(){ const _af=ajustarFullaML; ajustarFullaML=function(){ const uv=ultVentaML(), d=diasDesde(uv);
+    if(d!=null&&d>1&&!confirm('⚠️ Tus ventas de ML cargadas llegan solo al '+fechaBonita(uv)+' (hace '+d+' días).\n\nEl reporte de Full ya descontó las ventas de esos días. Si cuadras ahora, cuando subas esas ventas se van a descontar OTRA VEZ.\n\nLo recomendable: primero sube tu Excel de ventas hasta hoy y después cuadra.\n\n¿Cuadrar de todos modos?')) return;
+    return _af(); };
+  const _aa=ajustarAmzReport; ajustarAmzReport=function(){ const ua=ultMovFecha(m=>/amazon/i.test(m.tipo||'')&&(m.salida||0)>0&&m.nota!=='cuadre-amz'), d=diasDesde(ua);
+    if(d!=null&&d>2&&!confirm('⚠️ Tu última venta de Amazon registrada es del '+fechaBonita(ua)+' (hace '+d+' días).\n\nSi cuadras ahora y después subes ventas de Amazon de esos días, se van a descontar otra vez.\n\n¿Cuadrar de todos modos?')) return;
+    return _aa(); }; })();
 
 function refresh(){ recomputeLive(); ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderAmzRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); renderDevol(); renderConc(); }
 function showTab(name){ TAB=name; document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hide',v.id!=='view-'+name)); }
@@ -1462,7 +1580,12 @@ function packOf(sku){ if(!sku) return 1; let q=1;
 /* halla el kit de una fila: por # de publicación (dígitos) o por SKU. Devuelve {key,comps} o {key:'',comps:null} */
 function kitOf(sku,pubRaw){
   const nums=(''+(pubRaw||'')).split(/[^\d]+/).filter(Boolean);
-  for(const pn of nums){ for(const key in RECETAS){ const kd=(''+key).split('|')[0].replace(/\D/g,''); if(kd&&kd===pn && RECETAS[key]&&RECETAS[key].length) return {key:key,comps:RECETAS[key]}; } }
+  for(const pn of nums){ let pubLevel='';
+    for(const key in RECETAS){ if(!(RECETAS[key]&&RECETAS[key].length)) continue; const i=(''+key).indexOf('|'), kd=(i>=0?key.slice(0,i):key).replace(/\D/g,''), ks=i>=0?key.slice(i+1):'';
+      if(!kd||kd!==pn) continue;
+      if(ks){ if(sku&&ks===sku) return {key:key,comps:RECETAS[key]}; }      // receta de ESTA variante (talla/color)
+      else if(!pubLevel) pubLevel=key; }                                     // receta de toda la publicación
+    if(pubLevel) return {key:pubLevel,comps:RECETAS[pubLevel]}; }
   if(sku && RECETAS[sku] && RECETAS[sku].length) return {key:sku,comps:RECETAS[sku]};
   return {key:'',comps:null};
 }
@@ -1709,19 +1832,22 @@ function eachValidSale(cb){ for(const s of SALES){ if(!s.sku||s.u<=0) continue; 
 function seedDate(){ let d=''; for(const m of MOVS){ if(m.tipo==='Saldo inicial' && (m.fecha||'')>d) d=m.fecha; } return d; }
 function corteEfectivo(){ return INVCORTE || seedDate() || ''; }
 /* reconstruye los movimientos de VENTA desde SALES (con su fecha REAL), SOLO los posteriores a la fecha de corte — lo anterior ya está dentro del saldo inicial, así no se descuenta doble */
-function syncSalesMovs(){ const hasBase=MOVS.some(m=>m.nota!=='ventas'); MOVS=MOVS.filter(m=>m.nota!=='ventas');
+function syncSalesMovs(){ const hasBase=MOVS.some(m=>m.nota!=='ventas'); MOVS=MOVS.filter(m=>m.nota!=='ventas'); let snap=0;
   if(hasBase){ const corte=corteEfectivo();
     for(const s of SALES){ if(!s.sku||s.u<=0) continue; if(corte && s.f && s.f<=corte) continue;
       const ubic=s.ubic||'bodega';
       if(ubic==='full'){
         // FULL: 1 venta = 1 unidad por fila (como ML). Default 1 publicación; si está marcada "separar en Full" → cada pieza distinta
-        for(const ds of fullSkus(s.sku,s.pid)){ MOVS.push({id:movId(),fecha:s.f||hoy(),tipo:'Venta Full',sku:ds,nombre:nombreDe(ds),ubic:'full',entrada:0,salida:s.u,costo:0,prov:'',nota:'ventas',pub:s.pid,ref:s.vid}); }
+        if(!s.fs){ s.fs=fullSkus(s.sku,s.pid); snap++; }
+        for(const ds of s.fs){ MOVS.push({id:movId(),fecha:s.f||hoy(),tipo:'Venta Full',sku:ds,nombre:nombreDe(ds),ubic:'full',entrada:0,salida:s.u,costo:0,prov:'',nota:'ventas',pub:s.pid,ref:s.vid}); }
       } else {
         // BODEGA (Mercado Envíos): descuenta las PIEZAS reales del kit
-        const comps=recetaForEnvio(s.sku,s.pid);
+        if(!s.rc){ s.rc=recetaForEnvio(s.sku,s.pid).map(c=>({sku:c.sku,qty:c.qty})); snap++; }
+        const comps=s.rc;
         for(const c of comps){ const q=parseNum(c.qty)||1;
           MOVS.push({id:movId(),fecha:s.f||hoy(),tipo:'Venta Mercado Envíos',sku:c.sku,nombre:nombreDe(c.sku),ubic:'bodega',entrada:0,salida:s.u*q,costo:0,prov:'',nota:'ventas',pub:s.pid,ref:s.vid}); }
       } } }
+  if(snap) saveJSON(LS_SALES,SALES);
   saveMovs(); }
 function generateSalesMovements(){ syncSalesMovs(); recomputeLive(); }
 function markSalesApplied(){ }
