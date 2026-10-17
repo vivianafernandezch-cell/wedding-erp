@@ -95,6 +95,11 @@
 
 
   <div id="dataPanel">
+  <div class="card" id="concPromo" style="background:var(--warn-bg);border:1px solid rgba(217,138,0,.35)">
+    <h3 class="vh" style="margin-top:0">🏦 Nuevo: Conciliación Mercado Libre ↔ Mercado Pago ↔ banco</h3>
+    <p class="hint" style="margin:0 0 10px">Esta copia todavía no tiene tus datos, por eso no ves las pestañas. Para verla con tu información: <b>1)</b> en tu ERP en línea baja un respaldo (💾 Respaldo → ⬇️ Descargar respaldo) y <b>2)</b> cárgalo aquí.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="concGoRestore">📂 Cargar mi respaldo (.json)</button><button class="btn ghost" id="concOpenNow">Abrir Conciliación sin datos</button></div>
+  </div>
   <div class="card" id="cardVentasML">
     <h2><span class="step">1</span> Carga tus ventas</h2>
     <div class="row" style="align-items:flex-end">
@@ -206,9 +211,11 @@
     <div class="mtab" data-tab="reportes">📥 Reportes</div>
     <div class="mtab" data-tab="recetas">🧩 Kits / Recetas</div>
     <div class="mtab" data-tab="devol">↩️ Devoluciones</div>
+    <div class="mtab" data-tab="conc">🏦 Conciliación</div>
   </div>
 
   <div class="view hide" id="view-resumen"></div>
+  <div class="view hide" id="view-conc"></div>
   <div class="view hide" id="view-devol">
     <div class="tbar"><input type="text" id="devolSearch" placeholder="🔍 Buscar producto, SKU, # de venta o motivo…" style="width:320px"><button class="btn ghost sm" id="devolExport">⬇️ CSV</button></div>
     <div id="devolKpis" class="kpis"></div>
@@ -311,6 +318,7 @@ let CUADREMODE=loadJSON(LS_CUADRE,false);   // modo cuadre: mientras está ON, c
 let SALES=loadJSON(LS_SALES,[]), SALEFILTER=loadJSON(LS_SALEFILTER,null), INVCORTE=loadJSON(LS_INVCORTE,'');
 let DEVOL=loadJSON(LS_DEVOL,[]);   // devoluciones/cancelaciones detectadas al subir ventas
 let GASTOSMES=loadJSON(LS_GASTOSMES,{}), GMSEL="";
+const LS_CONC="ml_conc_v3"; let CONC=loadJSON(LS_CONC,{susc:399,meses:{}}), CONCSEL="", CONCFILES={}, CONCALL=false;   // 🏦 conciliación ML ↔ Mercado Pago ↔ banco
 let REABINFO={win:30,from:'',to:''};   // ventana usada para el reabasto (info para mostrar)
 let REABRANGE=loadJSON(LS_REABRANGE,null);   // rango de fechas manual del reabasto (si lo fija desde la pestaña); null = últimos N días
 let FOTOS=loadJSON(LS_FOTOS,{});   // {sku: url de foto} — se muestra como miniatura; se sincroniza
@@ -699,7 +707,7 @@ function gastosPeriodoTipo(from,to,tipo){
     const ovStart=from>mStart?from:mStart, ovEnd=to<mEnd?to:mEnd; if(ovStart>ovEnd) continue;
     total += mt * daysBetween(ovStart,ovEnd)/dim; }
   return total; }
-function gastosDelPeriodo(from,to){ const ins=gastosPeriodoTipo(from,to,'insumo'), fij=gastosPeriodoTipo(from,to,'fijo'); return {ins,fij,tot:ins+fij}; }
+function gastosDelPeriodo(from,to){ const ins=gastosPeriodoTipo(from,to,'insumo'), fij=gastosPeriodoTipo(from,to,'fijo'), mlx=concPeriodo(from,to); return {ins,fij,mlx,tot:ins+fij+mlx}; }
 function gastosMesCard(){
   const meses=[...new Set(SALES.map(s=>(s.f||'').slice(0,7)).filter(Boolean))].sort().reverse();
   const sel=GMSEL || (SALEFILTER&&SALEFILTER.to?SALEFILTER.to.slice(0,7):'') || meses[0] || isoDate(new Date()).slice(0,7); GMSEL=sel;
@@ -805,7 +813,7 @@ function renderResumen(){
     <div class="line"><span>− Costo de tus productos</span><b class="neg">−${mxn.format(costoProdT)}</b></div>
     ${empaqueT>0?`<div class="line"><span>− Empaque y operación (${num.format(ventasN)} ventas)</span><b class="neg">−${mxn.format(empaqueT)}</b></div>`:''}
     <div class="line${fijosPeriodo>0?'':' big'}"><span>${fijosPeriodo>0?'= Ganancia operativa (ya con producto y empaque)':'💰 Ganancia del periodo'}</span><b class="pos">${mxn.format(gan)}</b></div>
-    ${fijosPeriodo>0?`${gp.ins>0?`<div class="line"><span>− Insumos del mes (bolsas, cinta…)</span><b class="neg">−${mxn.format(gp.ins)}</b></div>`:''}${gp.fij>0?`<div class="line"><span>− Gastos fijos del mes (contadora, plataforma…)</span><b class="neg">−${mxn.format(gp.fij)}</b></div>`:''}
+    ${fijosPeriodo>0?`${gp.ins>0?`<div class="line"><span>− Insumos del mes (bolsas, cinta…)</span><b class="neg">−${mxn.format(gp.ins)}</b></div>`:''}${gp.fij>0?`<div class="line"><span>− Gastos fijos del mes (contadora, plataforma…)</span><b class="neg">−${mxn.format(gp.fij)}</b></div>`:''}${gp.mlx>0?`<div class="line"><span>− Publicidad, Full y suscripción de ML <span style="color:var(--muted);font-size:12px">(de 🏦 Conciliación)</span></span><b class="neg">−${mxn.format(gp.mlx)}</b></div>`:''}
     <div class="line big"><span>💰 Ganancia NETA del negocio</span><b class="${ganNeta>=0?'pos':'neg'}">${mxn.format(ganNeta)}</b></div>`:''}</div>
     <p class="foot">El renglón "Comisión e impuestos" es como lo reporta ML (junta comisión + IVA en una sola cifra). El impuesto retenido por separado (ISR/IVA) viene en tu reporte de <b>Retenciones de impuestos</b> de ML — si lo subes, te lo desgloso aparte.</p>`+mesChartCard()+gastosMesCard();
 }
@@ -1080,7 +1088,337 @@ function renderConciliacion(){ const v=$('concBox'); if(!v) return;
    '<div class="card"><h3 class="vh">🏷️ Publicado pero SIN stock en bodega</h3>'+
      (sinBod.length?'<div class="tablewrap" style="max-height:36vh"><table><thead><tr><th>Producto</th><th>SKU</th></tr></thead><tbody>'+
        sinBod.slice(0,300).map(x=>'<tr><td class="prod" style="max-width:380px">'+escapeHtml(x.nombre)+'</td><td>'+escapeHtml(x.sku)+'</td></tr>').join('')+'</tbody></table></div>'+(sinBod.length>300?'<p class="hint">Mostrando 300 de '+sinBod.length+'.</p>':''):'<p class="hint">🎉 Todo lo publicado tiene stock.</p>')+'</div>'; }
-function refresh(){ recomputeLive(); ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderAmzRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); renderDevol(); }
+/* ---------- 🏦 CONCILIACIÓN ML ↔ MERCADO PAGO ↔ BANCO ---------- */
+const cTOL=0.02;
+const CONC_TIPOS={ventas:'Ventas de ML (Excel de ventas)',trans:'Mercado Pago · Todas las transacciones',lib:'Mercado Pago · Liberaciones',ret:'Mercado Pago · Retiros',fact:'Facturación de Mercado Libre (recomendado)',banco:'Estado de cuenta del banco · PDF (recomendado)'};
+function concSave(){ saveJSON(LS_CONC,CONC); }
+function cNum(v){ if(v==null||v==='') return 0; const n=parseFloat((''+v).replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+function cId(v){ const s=(''+(v==null?'':v)).trim(); if(!s||s==='nan') return '';
+  if(/e\+?\d+$/i.test(s)||/^\d+\.0+$/.test(s)){ const n=Number(s); if(isFinite(n)) return BigInt(Math.round(n)).toString(); }
+  return s; }
+function cDate(v){ const s=(''+(v==null?'':v)).trim(); if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const n=Number(s); if(s&&isFinite(n)&&n>20000&&n<80000) return new Date(Math.round((n-25569)*86400000)).toISOString().slice(0,10);
+  return ''; }
+function cTable(rows,test){ const hi=rows.findIndex(r=>(r||[]).some(c=>test((''+c).trim()))); if(hi<0) return [];
+  const idx={}; (rows[hi]||[]).forEach((h,i)=>{ h=(''+h).trim(); if(h&&idx[h]==null) idx[h]=i; });
+  const out=[]; for(let r=hi+1;r<rows.length;r++){ const a=rows[r]; if(!a||!a.some(x=>(''+x).trim())) continue;
+    const o={}; for(const h in idx) o[h]=a[idx[h]]!=null?(''+a[idx[h]]).trim():''; out.push(o); }
+  return out; }
+const CONC_MARK={ventas:c=>c==='# de venta', trans:c=>c==='TRANSACTION_TYPE', lib:c=>c==='FECHA DE LIBERACIÓN', ret:c=>c.includes('(withdraw_id)'), fact:c=>c==='Valor del cargo'};
+function concDetect(rows){ const top=rows.slice(0,15); for(const t in CONC_MARK){ if(top.some(r=>(r||[]).some(c=>CONC_MARK[t]((''+c).trim())))) return t; } return ''; }
+
+function concCompute(F){
+  const V=F.ventas.filter(o=>o['Total (MXN)']!=='').map(o=>({id:cId(o['# de venta']),f:o['Fecha de venta'],e:o['Estado'],d:o['Descripción del estado'],ml:cNum(o['Total (MXN)']),bruto:cNum(o['Ingresos por productos (MXN)'])}));
+  const vk=new Set(V.map(x=>x.id));
+  // Mercado Pago: lo que dice cada cobro, por paquete (o por orden si no hay paquete)
+  const MP={}; let reten=0;
+  for(const o of F.trans){ reten-=cNum(o.TAXES_AMOUNT); const k=cId(o.PACK_ID)||cId(o.ORDER_ID); if(!k) continue;
+    const m=MP[k]=MP[k]||{v:0,r:0,src:''+(o.SOURCE_ID||''),f:cDate(o.TRANSACTION_DATE)}; const n=cNum(o.SETTLEMENT_NET_AMOUNT), ty=o.TRANSACTION_TYPE;
+    if(ty==='SETTLEMENT'||ty==='SETTLEMENT_SHIPPING') m.v+=n; else if(ty==='REFUND'||ty==='DISPUTE') m.r+=n; }
+  // Liberaciones: movimientos del saldo disponible
+  let ini=0, fin=null, mes=''; const LIB={}, mov=[];
+  for(const o of F.lib){ const t=o['TIPO DE REGISTRO'], n=cNum(o['MONTO NETO ACREDITADO'])-cNum(o['MONTO NETO DEBITADO']);
+    if(!mes) mes=cDate(o['FECHA DE LIBERACIÓN']).slice(0,7);
+    if(t==='Dinero disponible inicial'){ ini=n; continue; }
+    if(t!=='Liberaciones') continue;
+    const k=cId(o['ID DE LA ORDEN'])?(cId(o['ID DEL PAQUETE'])||cId(o['ID DE LA ORDEN'])):'';
+    mov.push({k,d:o['DESCRIPCIÓN']||'',n,op:''+(o['ID DE OPERACIÓN EN MERCADO PAGO']||''),f:cDate(o['FECHA DE LIBERACIÓN'])});
+    if(o.SALDO!=='') fin=cNum(o.SALDO); if(k) LIB[k]=(LIB[k]||0)+n; }
+  if(fin==null) fin=ini+mov.reduce((a,x)=>a+x.n,0);
+  // Facturación ML: cargos por concepto y cargos anulados con nota de crédito
+  const DET={}, ANUL={};
+  for(const o of (F.fact||[])){ const val=cNum(o['Valor del cargo']), dt=o['Detalle']||''; DET[dt]=(DET[dt]||0)+val;
+    if(/Anulado/i.test(o['Estado del cargo']||'')){ const k=cId(o['Número de paquete'])||cId(o['Número de venta']); (ANUL[k]=ANUL[k]||[]).push(val); } }
+  const ventas=V.map(x=>{ const m=MP[x.id], mp=m?+(m.v+m.r).toFixed(2):null, lib=+(LIB[x.id]||0).toFixed(2), dif=+(x.ml-(mp||0)).toFixed(2), pend=+((mp||0)-lib).toFixed(2); let s;
+    if(mp==null) s='r:No está en Mercado Pago';
+    else if(Math.abs(dif)>cTOL){ const a=ANUL[x.id]||[], sum=a.reduce((p,q)=>p+q,0); s=[...a,sum].some(q=>Math.abs(q-Math.abs(dif))<cTOL)?'g:Cargo anulado por ML (nota de crédito)':'r:Diferencia ML vs MP'; }
+    else if(pend>cTOL) s='y:Pendiente de liberar'; else s='g:Cuadra y liberada';
+    return {id:x.id,f:x.f,e:x.e,d:x.d,ml:x.ml,mp,dif,lib,pend,s,b:x.bruto}; });
+  const canceladas=[], otros=[];
+  for(const k in MP){ if(vk.has(k)) continue; const m=MP[k], tot=m.v+m.r;
+    if(Math.abs(tot)<cTOL) canceladas.push([k,+m.v.toFixed(2),+m.r.toFixed(2)]);
+    else if(/^\d+$/.test(m.src)) otros.push([k,m.f,+tot.toFixed(2)]); }
+  // Flujo del saldo de Mercado Pago
+  const mesTxt=mes?new Date(mes+'-15').toLocaleDateString('es-MX',{month:'long'}):'el mes';
+  const G=[['Ventas de '+mesTxt+' liberadas'],['Ventas del mes anterior liberadas'],['Reembolsos de envío a tu favor'],['Cashback'],['Comisiones devueltas por devoluciones'],['Reclamos (mediaciones) descontados'],['Retenciones y liberaciones de reservas (neto)'],['Pago de factura Mercado Libre (cargos del mes anterior)'],['Pagos hechos con tu saldo (compras / gastos)'],['Retiros a tu banco'],['Otros']].map(g=>[g[0],0,0]);
+  const gi=name=>G.findIndex(g=>g[0]===name);
+  for(const x of mov){ const d=x.d; let g='Otros';
+    if(d==='Pago'&&x.n>0) g=vk.has(x.k)?G[0][0]:G[1][0];
+    else if(d==='Pago'&&x.n<0) g=/^\d+$/.test(x.op)?G[8][0]:G[7][0];
+    else if(d==='Envío') g=G[2][0]; else if(d==='Mediación') g=G[5][0]; else if(d==='Devolución de dinero') g=G[4][0];
+    else if(/^Reserva/.test(d)||d==='reserve_for_dispute') g=G[6][0]; else if(d.toLowerCase()==='cashback') g=G[3][0]; else if(d==='Retiro de dinero') g=G[9][0];
+    const i=gi(g); G[i][1]++; G[i][2]+=x.n; x.g=i; }
+  const flujo=G.map((g,i)=>[g[0],g[1],+g[2].toFixed(2),i]).filter(g=>g[1]), movs=mov.map(x=>[x.f,x.d,x.k,+x.n.toFixed(2),x.g,x.op]);
+  const prev=(CONC.meses&&CONC.meses[mes]&&CONC.meses[mes].retiros)||[];
+  const retiros=F.ret.map(o=>{ const id=cId(o['Número de retiro (withdraw_id)']), p=prev.find(r=>r.id===id);
+    return {id,f:cDate(o['Fecha de creación del retiro (date_created)']),m:cNum(o['Monto (amount)']),fee:cNum(o['Tarifa de retiro (fee)']),st:o['Estado (status)']||'',bco:o['Nombre del banco (bank_name)']||'',cta:o['Número de cuenta (bank_account_number)']||'',ok:!!(p&&p.ok)}; });
+  const g2=(...ks)=>+ks.reduce((a,k)=>a+(DET[k]||0),0).toFixed(2);
+  const costos=F.fact?{comision:g2('Cargo por venta','Anulación del cargo por venta'),envios:g2('Cargo por envíos de Mercado Libre','Anulación del cargo por envíos de Mercado Libre'),
+    publicidad:g2('Cargo por campaña de publicidad de Product Ads'),fullAlm:g2('Cargo por servicio de almacenamiento Full'),fullCol:g2('Cargo por servicio de colecta Full'),afil:g2('Cargo por venta con afiliados')}:null;
+  return {mes,creado:isoDate(new Date()),ini:+ini.toFixed(2),fin:+fin.toFixed(2),cuadra:Math.abs(ini+mov.reduce((a,x)=>a+x.n,0)-fin)<cTOL,
+    ventas,items:concItems(F.ventas),flujo,movs,retiros,canceladas,otros,costos,bruto:+V.reduce((a,x)=>a+x.bruto,0).toFixed(2),reten:+reten.toFixed(2),susc:cNum(CONC.susc)};
+}
+
+function concExtraMes(mes){ const M=CONC.meses&&CONC.meses[mes]; if(!M||!M.costos) return 0; const c=M.costos; return (c.publicidad||0)+(c.fullAlm||0)+(c.fullCol||0)+(c.afil||0)+(M.susc||0); }
+function concPeriodo(from,to){ let total=0;
+  for(const mes in (CONC.meses||{})){ const mt=concExtraMes(mes); if(!mt) continue;
+    if(!from||!to){ total+=mt; continue; }
+    const pp=mes.split('-'), y=+pp[0], m=+pp[1]; if(!y||!m) continue;
+    const dim=new Date(y,m,0).getDate(), mStart=mes+'-01', mEnd=mes+'-'+String(dim).padStart(2,'0');
+    const ovStart=from>mStart?from:mStart, ovEnd=to<mEnd?to:mEnd; if(ovStart>ovEnd) continue;
+    total+=mt*daysBetween(ovStart,ovEnd)/dim; }
+  return total; }
+
+function concFluLine(M,f){ const head='<span>'+(f[2]<0?'− ':'+ ')+escapeHtml(f[0])+' <span style="color:var(--muted);font-size:12px">('+f[1]+')</span></span><b class="'+(f[2]<0?'neg':'')+'">'+mxn2.format(f[2])+'</b>';
+  if(!M.movs||f[3]==null) return '<div class="line">'+head+'</div>';
+  const tit={}; (M.items||[]).forEach(x=>{ if(!tit[x.v]) tit[x.v]=x.t; });
+  const rows=M.movs.filter(m=>m[4]===f[3]).sort((a,b)=>(''+a[0]).localeCompare(''+b[0]));
+  const DESC={'Pago':'Venta liberada','Envío':'Reembolso de envío','Mediación':'Reclamo (mediación)','Devolución de dinero':'Comisión devuelta','Retiro de dinero':'Retiro a tu banco','reserve_for_dispute':'Retención por reclamo','cashback':'Cashback'};
+  return '<details class="concFlu"><summary class="line" style="cursor:pointer">'+head.replace('<span>','<span>▸ ')+'</summary><div class="tablewrap" style="max-height:38vh;margin:4px 0 10px"><table><thead><tr><th>Fecha</th><th>Qué fue</th><th># de venta / operación</th><th>Producto</th><th>Monto</th></tr></thead><tbody>'+
+    rows.slice(0,400).map(m=>'<tr><td style="white-space:nowrap">'+escapeHtml((m[0]||'').slice(5).split('-').reverse().join('/'))+'</td><td>'+escapeHtml(m[3]<0&&m[1]==='Pago'?(/^\d+$/.test(m[5])?'Pago con tu saldo':'Pago de factura ML'):(DESC[m[1]]||m[1]))+'</td><td style="white-space:nowrap">'+escapeHtml(m[2]||m[5]||'')+'</td><td style="max-width:300px;font-size:12px;white-space:normal">'+escapeHtml(tit[m[2]]||'')+'</td><td class="'+(m[3]<0?'neg':'')+'">'+mxn2.format(m[3])+'</td></tr>').join('')+
+    '</tbody></table></div></details>'; }
+function concBadge(s){ const t=s.slice(2), c=s[0]; return '<span class="badge '+(c==='g'?'b-good':c==='y'?'b-warn':'b-bad')+'">'+(c==='g'?'🟢 ':c==='y'?'🟡 ':'🔴 ')+escapeHtml(t)+'</span>'; }
+function concMesNombre(mes){ return mes?new Date(mes+'-15').toLocaleDateString('es-MX',{month:'long',year:'numeric'}):''; }
+function concFileListHtml(){ return Object.keys(CONC_TIPOS).map(t=>{ const f=CONCFILES[t];
+  return '<div style="font-size:13px;margin:3px 0">'+(f?'✅':'⚪️')+' '+CONC_TIPOS[t]+(f?' <span style="color:var(--muted)">· '+escapeHtml(f.name)+'</span>':'')+'</div>'; }).join(''); }
+function concUploadHtml(){
+  return '<div class="card"><h3 class="vh">🏦 Conciliación Mercado Libre ↔ Mercado Pago ↔ banco</h3>'+
+  '<p class="hint" style="margin-top:0">Comprueba que <b>lo que vendes sí te lo depositan</b>. Sube los reportes de <b>un mes</b> (puedes seleccionarlos todos juntos) y yo detecto cuál es cuál.</p>'+
+  '<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><input type="file" id="concFiles" multiple accept=".xlsx,.pdf">'+
+  '<label style="font-size:13px">Suscripción ML al mes (se cobra a tu tarjeta) $ <input type="number" id="concSusc" value="'+escapeHtml(CONC.susc!=null?CONC.susc:399)+'" style="width:90px"></label>'+
+  '<button class="btn" id="concRun">Conciliar ▸</button></div>'+
+  '<div id="concFileList" style="margin-top:10px">'+concFileListHtml()+'</div><div id="concMsg" class="hint"></div>'+
+  '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:600">📥 ¿Dónde descargo cada reporte?</summary><ol style="font-size:13px;line-height:1.7;margin:8px 0 0">'+
+  '<li><b>Ventas de ML:</b> Central de vendedores → Ventas → quita el filtro <i>Envíos de hoy</i> → fecha <i>Personalizada</i> (el mes) → <i>Descargar Excel de ventas</i>.</li>'+
+  '<li><b>Mercado Pago</b> → Reportes → <i>Cerrar y conciliar el mes</i>: <b>Todas las transacciones</b> y <b>Liberaciones</b> (Crear reporte → Manual → el mes → .xlsx). Llegan como <i>settlement-…</i> y <i>RML…</i></li>'+
+  '<li><b>Mercado Pago</b> → Reportes → <b>Retiros</b> → Crear reporte → Crear → el mes. Llega como <i>withdraw-…</i></li>'+
+  '<li><b>Facturación ML</b> (opcional, recomendado): Facturación → Resumen de facturación → el mes → Reportes → <i>Facturación de Mercado Libre</i>. Con esto sumo publicidad y Full a tu ganancia real.</li>'+
+  '<li><b>Banco:</b> el <b>PDF de tu estado de cuenta</b> de BanBajío del mismo mes. Con él confirmo tus retiros solos y sumo banco, contadora e impuestos.</li></ol></details></div>'; }
+
+function concMesHtml(M,meses){
+  const n=M.ventas.length, ok=M.ventas.filter(x=>x.s[0]!=='r').length, anul=M.ventas.filter(x=>/anulado/.test(x.s)).length;
+  const pl=M.ventas.filter(x=>x.s[0]==='y'), plT=pl.reduce((a,x)=>a+x.pend,0);
+  const rOk=M.retiros.filter(r=>r.ok).length, rT=M.retiros.reduce((a,r)=>a+r.m,0);
+  const cs=M.costos, cTot=cs?cs.comision+cs.envios+cs.publicidad+cs.fullAlm+cs.fullCol+cs.afil+(M.susc||0):0;
+  const sel='<div class="card" style="padding:12px 14px"><div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><b style="font-size:13px">📅 Mes:</b>'+
+    meses.map(m=>'<button class="btn sm '+(m===CONCSEL?'':'ghost')+' concMes" data-m="'+m+'">'+concMesNombre(m)+'</button>').join('')+
+    '<span style="flex:1"></span><button class="btn ghost sm" id="concDel">🗑️ Borrar este mes</button></div></div>';
+  const kp=[
+    {l:'🧾 Ventas que cuadran',v:ok+' / '+n,c:ok===n?'good':'bad',s:ok===n?('todas'+(anul?(' · '+anul+' por cargo anulado'):'')):((n-ok)+' con diferencia')},
+    {l:'⏳ Por liberar',v:mxn.format(plT),c:'warn',s:pl.length+' ventas · caen el mes siguiente'},
+    {l:'💼 Saldo Mercado Pago',v:M.cuadra?'Cuadra ✓':'No cuadra',c:M.cuadra?'good':'bad',s:mxn2.format(M.ini)+' → '+mxn2.format(M.fin)},
+    {l:'🏦 Retiros vistos en banco',v:rOk+' / '+M.retiros.length,c:rOk===M.retiros.length?'good':'warn',s:mxn2.format(rT)+' retirado'},
+    cs?{l:'📣 Costo de vender en ML',v:(M.bruto?cTot/M.bruto*100:0).toFixed(1)+'%',c:'warn',s:mxn.format(cTot)+' de '+mxn.format(M.bruto)}:{l:'📣 Costo de vender en ML',v:'—',s:'sube Facturación ML'},
+    {l:'🧾 Retenciones ISR/IVA',v:mxn.format(M.reten),c:'blue',s:'no es gasto: se acreditan'}];
+  const kpHtml='<div class="kpis">'+kp.map(k=>`<div class="kpi ${k.c||''}"><div class="lbl">${k.l}</div><div class="val">${k.v}</div><div class="sub">${k.s||''}</div></div>`).join('')+'</div>';
+  const rev=[];
+  M.ventas.filter(x=>x.s[0]==='r').forEach(x=>rev.push('Venta <b>'+escapeHtml(x.id)+'</b>: ML dice '+mxn2.format(x.ml)+', Mercado Pago dice '+mxn2.format(x.mp||0)+'. Revísala en Facturación ML.'));
+  M.otros.forEach(o=>rev.push('Pago con tu saldo de <b>'+mxn2.format(o[2])+'</b> ('+escapeHtml(o[1])+', ref. '+escapeHtml(o[0])+'): ¿qué fue? Búscalo en Mercado Pago → Actividad.'));
+  if(!M.cuadra) rev.push('El saldo de Mercado Pago no cuadra: revisa que el reporte de Liberaciones sea del mes completo.');
+  const BB=CONC.banco&&CONC.banco[M.mes];
+  if(rOk<M.retiros.length) rev.push(BB?((M.retiros.length-rOk)+' retiros no aparecen en tu estado de cuenta: revisa la tabla de retiros.'):'Sube el PDF de tu estado de cuenta para confirmar tus retiros ('+(M.retiros.length-rOk)+' pendientes), o palomea los que ya viste.');
+  if(BB){ const sc=BB.movs.filter(mv=>mv.t==='car'&&!mv.c); if(sc.length) rev.push('Clasifica <b>'+sc.length+'</b> cargos de tu estado de cuenta (abajo, en 🏦 Tu estado de cuenta).'); }
+  const revHtml='<div class="card" style="background:'+(rev.length?'var(--warn-bg)':'var(--good-bg)')+'"><h3 class="vh">'+(rev.length?'⚠️ Para revisar':'✅ Todo cuadra este mes')+'</h3>'+
+    (rev.length?'<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">'+rev.map(r=>'<li>'+r+'</li>').join('')+'</ul>':'<p class="hint" style="margin:0">Lo que vendiste en Mercado Libre sí llegó a Mercado Pago y a tu banco.</p>')+'</div>';
+  const retHtml='<div class="card"><h3 class="vh">🏦 Retiros a tu banco <span style="font-weight:400;color:var(--muted);font-size:12px">— palomea cuando lo veas en tu estado de cuenta</span></h3><div class="tablewrap"><table><thead><tr><th>Fecha</th><th># de retiro</th><th>Monto</th><th>Banco</th><th>Cuenta</th><th>¿Lo vi en el banco?</th></tr></thead><tbody>'+
+    M.retiros.map((r,i)=>'<tr><td>'+escapeHtml(r.f)+'</td><td>'+escapeHtml(r.id)+'</td><td>'+mxn2.format(r.m)+(r.fee?' <span class="neg">(−'+mxn2.format(r.fee)+')</span>':'')+'</td><td>'+escapeHtml(r.bco)+'</td><td>'+escapeHtml(r.cta)+'</td><td><label style="cursor:pointer"><input type="checkbox" class="concRetOk" data-i="'+i+'"'+(r.ok?' checked':'')+'> '+(r.ok?'🟢 Llegó'+(r.fb?' el '+escapeHtml(r.fb.slice(5).split('-').reverse().join('/')):''):'🟡 Por confirmar')+'</label></td></tr>').join('')+
+    '<tr><td colspan="2"><b>Total</b></td><td><b>'+mxn2.format(rT)+'</b></td><td colspan="3"></td></tr></tbody></table></div>'+
+    '<p class="hint" style="margin:6px 0 0">Tip: en BanBajío la <i>clave de rastreo</i> del depósito es <b>CPO + el # de retiro</b>.</p></div>';
+  const fluHtml='<div class="card"><h3 class="vh">💼 Cómo se movió tu saldo de Mercado Pago <span style="font-weight:400;color:var(--muted);font-size:12px">— pícale a cada renglón para ver el detalle</span></h3><div class="funnel">'+
+    '<div class="line"><span>Saldo al inicio del mes</span><b>'+mxn2.format(M.ini)+'</b></div>'+
+    M.flujo.map(f=>concFluLine(M,f)).join('')+
+    '<div class="line big"><span>= Saldo al cierre '+(M.cuadra?'✅ cuadra al centavo':'❌ no cuadra')+'</span><b>'+mxn2.format(M.fin)+'</b></div></div></div>';
+  const vs=CONCALL?M.ventas:M.ventas.filter(x=>x.s[0]!=='g'||/anulado/.test(x.s));
+  const venHtml='<div class="card"><h3 class="vh">🧾 Venta por venta <span style="font-weight:400;color:var(--muted);font-size:12px">— '+(CONCALL?'todas':'solo las que tienen algo que ver')+'</span> <button class="btn ghost sm" id="concAll" style="margin-left:8px">'+(CONCALL?'Ver solo pendientes':'Ver las '+n)+'</button></h3>'+
+    '<div class="tablewrap" style="max-height:52vh"><table><thead><tr><th># de venta</th><th>Fecha</th><th>Estado</th><th>Total ML</th><th>Total MP</th><th>Diferencia</th><th>Liberado</th><th>Por liberar</th><th>Semáforo</th></tr></thead><tbody>'+
+    (vs.length?vs.map(x=>'<tr><td style="white-space:nowrap">'+escapeHtml(x.id)+'</td><td style="white-space:nowrap">'+escapeHtml((x.f||'').replace(/ de 20\d\d.*$/,''))+'</td><td style="max-width:240px">'+escapeHtml(x.e)+(x.d?'<br><span style="color:var(--muted);font-size:12px">'+escapeHtml(x.d)+'</span>':'')+'</td><td>'+mxn2.format(x.ml)+'</td><td>'+(x.mp==null?'—':mxn2.format(x.mp))+'</td><td class="'+(Math.abs(x.dif)>cTOL?'neg':'')+'">'+mxn2.format(x.dif)+'</td><td>'+mxn2.format(x.lib)+'</td><td>'+(x.pend>cTOL?mxn2.format(x.pend):'—')+'</td><td>'+concBadge(x.s)+'</td></tr>').join(''):'<tr><td colspan="9" class="hint">Nada pendiente 🎉</td></tr>')+
+    '</tbody></table></div></div>';
+  const cosHtml=cs?('<div class="card"><h3 class="vh">📣 Lo que te cuesta vender en ML este mes</h3><div class="funnel">'+
+    '<div class="line"><span>Ventas brutas de productos</span><b>'+mxn2.format(M.bruto)+'</b></div>'+
+    [['Comisión por venta (neto de anulaciones)',cs.comision],['Envíos de Mercado Libre (neto de anulaciones)',cs.envios],['Publicidad (Product Ads)',cs.publicidad],['Full: almacenamiento',cs.fullAlm],['Full: colecta',cs.fullCol],['Afiliados',cs.afil],['Suscripción (tu tarjeta)',M.susc||0]].filter(r=>r[1]).map(r=>'<div class="line"><span>− '+r[0]+' <span style="color:var(--muted);font-size:12px">'+(M.bruto?(r[1]/M.bruto*100).toFixed(1)+'%':'')+'</span></span><b class="neg">−'+mxn2.format(r[1])+'</b></div>').join('')+
+    '<div class="line big"><span>Total cargos de ML ('+(M.bruto?(cTot/M.bruto*100).toFixed(1):'0')+'% de tus ventas)</span><b class="neg">−'+mxn2.format(cTot)+'</b></div></div>'+
+    '<p class="foot">Comisión y envío ya se restan en tu Resumen. <b>Publicidad, Full, afiliados y suscripción</b> ('+mxn.format(concExtraMes(M.mes))+') ahora también se restan en la <b>Ganancia NETA</b> del 📊 Resumen.</p></div>'):'';
+  const canHtml=M.canceladas.length?('<div class="card"><details><summary style="cursor:pointer;font-weight:600">🟢 '+M.canceladas.length+' ventas canceladas al momento (efecto $0 en tu dinero)</summary><div class="tablewrap" style="max-height:30vh;margin-top:8px"><table><thead><tr><th>Paquete / orden</th><th>Cobro</th><th>Reembolso</th></tr></thead><tbody>'+
+    M.canceladas.map(c=>'<tr><td>'+escapeHtml(c[0])+'</td><td>'+mxn2.format(c[1])+'</td><td>'+mxn2.format(c[2])+'</td></tr>').join('')+'</tbody></table></div></details></div>'):'';
+  const viejo=(!M.items||!M.movs)?'<div class="card" style="background:var(--bad-bg);border:2px solid var(--bad)"><h3 class="vh" style="color:var(--bad)">🔄 Este mes se concilió con la versión anterior</h3><p style="margin:0;font-size:14px;line-height:1.6">Para ver <b>tu utilidad real, top 5, productos sin costo, rentabilidad del negocio y el detalle de Mercado Pago</b>, vuelve a subir arriba los reportes de '+concMesNombre(M.mes)+' (los 5 Excel + el PDF de tu estado de cuenta) y dale <b>Conciliar ▸</b>. Tus palomitas se conservan.</p></div>':'';
+  return sel+'<h2 style="margin:6px 0 10px">'+concMesNombre(M.mes)+'</h2>'+viejo+kpHtml+revHtml+concDecisionHtml(M)+retHtml+concBancoHtml(M)+fluHtml+venHtml+cosHtml+canHtml;
+}
+/* ---- 📈 Para decidir: utilidad real por producto (ventas ML − cargos ML − publicidad/Full − costo − empaque) ---- */
+function concItems(rows){ const out=[], P='Precio unitario para venta directa / Precio sugerido para reventa (MXN)'; let i=0;
+  while(i<rows.length){ const h=rows[i]; if(h['Total (MXN)']===''){ i++; continue; }
+    const kids=[]; let j=i+1; while(j<rows.length&&rows[j]['Total (MXN)']===''&&rows[j]['# de venta']){ kids.push(rows[j]); j++; }
+    const lines=kids.length?kids:[h], w=lines.map(r=>Math.max(cNum(r[P])*(cNum(r['Unidades'])||1),0.01)), W=w.reduce((a,b)=>a+b,0);
+    const ing=cNum(h['Ingresos por productos (MXN)']), tot=cNum(h['Total (MXN)']);
+    lines.forEach((r,k)=>{ const f=w[k]/W, est=((r['Estado']&&!/^Paquete de/.test(r['Estado']))?r['Estado']:h['Estado'])||'';
+      const c=/cancel/i.test(est)?'can':(!/cambio/i.test(est)&&/reembolso al comprador|Devoluci[oó]n revisada|Devuelto el|Descartamos/i.test(est)?'dev':'ok');
+      out.push({v:cId(h['# de venta']),p:(r['# de publicación']||h['# de publicación']||'').replace(/\s/g,''),s:(r['SKU']||'').trim(),t:r['Título de la publicación']||'',va:(r['Variante']||'').trim(),
+        u:cNum(r['Unidades'])||cNum(h['Unidades'])||1,i:+(ing*f).toFixed(2),n:+(tot*f).toFixed(2),fu:/full/i.test((h['Forma de entrega']||'')+(r['Forma de entrega']||'')),
+        ad:/s[ií]/i.test((h['Venta por publicidad']||'')+(r['Venta por publicidad']||'')),c,x:/Descartamos/i.test(est)}); });
+    i=j; }
+  return out; }
+
+function concDecision(M){
+  const cs=M.costos||{}, empU=parseNum($('empaqueU')?$('empaqueU').value:0)||0;
+  const ok=M.items.filter(x=>x.c==='ok'), ingOk=ok.reduce((a,x)=>a+x.i,0), uFull=ok.filter(x=>x.fu).reduce((a,x)=>a+x.u,0);
+  const genX=(cs.publicidad||0)+(cs.afil||0)+(M.susc||0), fullX=(cs.fullAlm||0)+(cs.fullCol||0);
+  const P={}, vEmp=new Set();
+  for(const x of M.items){ const k=x.p+'|'+x.s, o=P[k]=P[k]||{p:x.p,s:x.s,t:x.t,va:x.va,u:0,ventas:0,ing:0,neto:0,costo:0,emp:0,ext:0,dev:0,devN:0,ad:0,fu:0,cu:0};
+    o.neto+=x.n; if(x.c==='ok'){ const cu=costoVentaLine(x.p,x.s); o.cu=cu; o.u+=x.u; o.ing+=x.i; o.costo+=cu*x.u; o.ventas++; if(x.ad) o.ad+=x.i; if(x.fu) o.fu+=x.u;
+      o.ext+=(ingOk?genX*x.i/ingOk:0)+(x.fu&&uFull?fullX*x.u/uFull:0);
+      if(!vEmp.has(x.v)){ vEmp.add(x.v); o.emp+=empU; } }
+    else { o.dev++; o.devN+=x.n; if(x.x) o.costo+=costoVentaLine(x.p,x.s)*x.u; } }
+  const L=Object.values(P).map(o=>{ o.cu=o.cu||costoVentaLine(o.p,o.s); o.util=o.neto-o.costo-o.emp-o.ext; o.mg=o.ing>0?o.util/o.ing*100:(o.util<0?-100:0); o.sinCosto=!(o.cu>0); o.nom=(typeof pubTitle==='function'&&o.p&&pubTitle(o.p)!==o.p?pubTitle(o.p):o.t)||o.s; return o; });
+  const T=L.reduce((a,o)=>{ a.neto+=o.neto; a.costo+=o.costo; a.emp+=o.emp; a.ext+=o.ext; a.util+=o.util; return a; },{neto:0,costo:0,emp:0,ext:0,util:0});
+  const adIng=ok.filter(x=>x.ad).reduce((a,x)=>a+x.i,0);
+  const dv=M.items.filter(x=>x.c!=='ok'), dvLoss=dv.reduce((a,x)=>a+Math.min(x.n,0),0)-dv.filter(x=>x.x).reduce((a,x)=>a+costoVentaLine(x.p,x.s)*x.u,0);
+  const seg=f=>{ const s=L.map(o=>({o,share:o.u?(f?o.fu:o.u-o.fu)/o.u:0})).filter(z=>z.share>0); const ing=s.reduce((a,z)=>a+z.o.ing*z.share,0), ut=s.reduce((a,z)=>a+z.o.util*z.share,0); return {ing,ut,mg:ing?ut/ing*100:0}; };
+  return {L,T,ingOk,ventasOk:new Set(ok.map(x=>x.v)).size,adIng,dv,dvLoss,full:seg(true),agen:seg(false)};
+}
+
+function concDecisionHtml(M){
+  if(!M.items) return '<div class="card"><p class="hint" style="margin:0">📈 Para ver tu utilidad real por producto, vuelve a darle <b>Conciliar ▸</b> a este mes con sus reportes.</p></div>';
+  const D=concDecision(M), T=D.T, cs=M.costos||{}, ml=D.ingOk-T.neto, mlPct=D.ingOk?(ml+T.ext)/D.ingOk*100:0, mg=D.ingOk?T.util/D.ingOk*100:0;
+  const conCosto=D.L.filter(o=>o.u>0&&!o.sinCosto), top=conCosto.slice().sort((a,b)=>b.util-a.util).slice(0,5), pierden=D.L.filter(o=>o.util<-0.5).sort((a,b)=>a.util-b.util);
+  const sinC=D.L.filter(o=>o.u>0&&o.sinCosto), bajos=conCosto.filter(o=>o.util>=0&&o.mg<10&&o.u>=2).sort((a,b)=>a.mg-b.mg);
+  const topShare=T.util>0?top.reduce((a,o)=>a+o.util,0)/T.util*100:0, pub=cs.publicidad||0, acos=D.adIng?pub/D.adIng*100:0, roas=pub?D.adIng/pub:0;
+  const mgAntesAds=D.ingOk?(T.util+pub)/D.ingOk*100:0;
+  const nm=o=>escapeHtml(o.nom)+(o.va&&o.va!=='-'?' <span style="color:var(--muted);font-size:12px">'+escapeHtml(o.va)+'</span>':'');
+  const pyl='<div class="card"><h3 class="vh">💰 Tu utilidad REAL de Mercado Libre — '+concMesNombre(M.mes)+'</h3><div class="funnel">'+
+    '<div class="line"><span>Vendiste (sin canceladas ni devueltas) · '+num.format(D.ventasOk)+' ventas</span><b>'+mxn.format(D.ingOk)+'</b></div>'+
+    '<div class="line"><span>− Comisión, envíos y retenciones que ML descuenta (incluye devoluciones)</span><b class="neg">−'+mxn.format(ml)+'</b></div>'+
+    '<div class="line"><span>= Te depositó Mercado Pago por estas ventas</span><b>'+mxn.format(T.neto)+'</b></div>'+
+    '<div class="line"><span>− Publicidad, Full, afiliados y suscripción</span><b class="neg">−'+mxn.format(T.ext)+'</b></div>'+
+    '<div class="line"><span>− Costo de tus productos</span><b class="neg">−'+mxn.format(T.costo)+'</b></div>'+
+    (T.emp?'<div class="line"><span>− Empaque</span><b class="neg">−'+mxn.format(T.emp)+'</b></div>':'')+
+    '<div class="line big"><span>💰 Utilidad real ML · '+mg.toFixed(1)+'% de lo que vendiste</span><b class="'+(T.util>=0?'pos':'neg')+'">'+mxn.format(T.util)+'</b></div></div>'+
+    '<p class="foot">De cada <b>$100</b> que vendes: ML y sus servicios se quedan <b>$'+mlPct.toFixed(0)+'</b>, tu producto y empaque cuestan <b>$'+(D.ingOk?(T.costo+T.emp)/D.ingOk*100:0).toFixed(0)+'</b> y a ti te quedan <b>$'+mg.toFixed(0)+'</b> limpios'+
+    (M.reten?'. Además recuperas <b>'+mxn.format(M.reten)+'</b> de retenciones ISR/IVA en tu declaración':'')+'. Abajo ves la rentabilidad completa del negocio (con contadora, banco e impuestos).'+(sinC.length?' <b style="color:var(--warn)">⚠️ '+(sinC.length===1?'1 producto no tiene':sinC.length+' productos no tienen')+' costo capturado: su utilidad sale inflada.</b>':'')+'</p></div>';
+  const ins=[];
+  ins.push('💵 Te quedan <b>'+mxn.format(T.util)+'</b> limpios de Mercado Libre este mes (<b>'+mg.toFixed(1)+'%</b> de tus ventas), unos <b>'+mxn.format(D.ventasOk?T.util/D.ventasOk:0)+'</b> por venta.');
+  if(top.length) ins.push('🏆 Tus 5 mejores productos dejan el <b>'+topShare.toFixed(0)+'%</b> de tu utilidad. '+(topShare>=50?'Cuídalos: que nunca les falte stock ni visibilidad.':'Tu utilidad está repartida, buena señal.'));
+  ins.push(pierden.length?('🚨 <b>'+pierden.length+'</b> productos te hicieron <b>perder '+mxn.format(-pierden.reduce((a,o)=>a+o.util,0))+'</b>. Revisa su precio, su costo o si conviene pausarlos.'):'✅ Ningún producto te hizo perder dinero este mes.');
+  if(pub) ins.push('📣 Publicidad: gastaste <b>'+mxn.format(pub)+'</b> y las ventas que llegaron por anuncios sumaron <b>'+mxn.format(D.adIng)+'</b> → por cada $1 en anuncios vendiste <b>$'+roas.toFixed(1)+'</b> (ACOS '+acos.toFixed(1)+'%). '+
+    (acos>mgAntesAds?'⚠️ Tu ACOS es mayor que tu margen antes de anuncios ('+mgAntesAds.toFixed(1)+'%): esas ventas por anuncio te cuestan más de lo que dejan. Baja presupuesto o deja solo tus productos más rentables.':'✅ Tu ACOS está por debajo de tu margen antes de anuncios ('+mgAntesAds.toFixed(1)+'%): la publicidad sí paga.'));
+  if(D.full.ing&&D.agen.ing) ins.push('🚚 Full deja <b>'+D.full.mg.toFixed(1)+'%</b> de margen vs <b>'+D.agen.mg.toFixed(1)+'%</b> por agencia/punto de despacho'+(D.full.mg>=D.agen.mg?' → Full te conviene.':' → revisa qué productos sí vale la pena tener en Full.'));
+  if(D.dv.length) ins.push('↩️ <b>'+new Set(D.dv.map(x=>x.v)).size+'</b> ventas canceladas o devueltas te costaron <b>'+mxn.format(-D.dvLoss)+'</b> (envíos y cargos que no regresan'+(D.dv.some(x=>x.x)?' + producto descartado':'')+').');
+  if(bajos.length) ins.push('🟡 <b>'+bajos.length+'</b> '+(bajos.length===1?'producto gana':'productos ganan')+' menos del 10%: '+bajos.slice(0,3).map(o=>escapeHtml(o.nom.slice(0,40))+' ('+o.mg.toFixed(0)+'%)').join(', ')+(bajos.length>3?'…':'')+'. Candidatos a subir precio.');
+  if(sinC.length) ins.push('⚠️ <b>'+sinC.length+'</b> '+(sinC.length===1?'producto vendido no tiene':'productos vendidos no tienen')+' costo capturado ('+sinC.slice(0,3).map(o=>escapeHtml(o.s||o.nom.slice(0,25))).join(', ')+(sinC.length>3?'…':'')+'). Captúralo en 📦 Inventario para que tu utilidad sea exacta.');
+  const insHtml='<div class="card"><h3 class="vh">💡 Lo que dicen tus números</h3><ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.8">'+ins.map(s=>'<li>'+s+'</li>').join('')+'</ul></div>';
+  const row=o=>'<tr><td class="prod" style="max-width:340px">'+(typeof fotoThumb==='function'?fotoThumb(o.s):'')+nm(o)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(o.s)+'</span></td><td>'+num.format(o.u)+'</td><td>'+mxn.format(o.ing)+'</td><td>'+(o.sinCosto?'<span class="badge b-warn">sin costo</span>':mxn.format(o.cu))+'</td><td class="'+(o.util<0?'neg':'pos')+'"><b>'+mxn.format(o.util)+'</b></td><td class="'+(o.mg<0?'m-bad':o.mg<10?'m-warn':'m-good')+'">'+o.mg.toFixed(0)+'%</td><td>'+(o.u?mxn.format(o.util/o.u):'—')+'</td></tr>';
+  const th='<thead><tr><th>Producto</th><th>Vendidos</th><th>Vendiste</th><th>Costo c/u</th><th>Utilidad real</th><th>Margen</th><th>Te deja c/u</th></tr></thead>';
+  const topHtml='<div class="card"><h3 class="vh">🏆 Top 5 que más utilidad te dejan</h3><div class="tablewrap"><table>'+th+'<tbody>'+(top.length?top.map(row).join(''):'<tr><td colspan="7" class="hint">Captura costos para ver tu top.</td></tr>')+'</tbody></table></div></div>';
+  const pierHtml='<div class="card" style="'+(pierden.length?'border:1px solid rgba(214,69,69,.35)':'')+'"><h3 class="vh">'+(pierden.length?'🚨 Productos que te hicieron perder dinero':'🔻 Productos que menos te dejan')+'</h3>'+(pierden.length?'<div class="tablewrap"><table>'+th+'<tbody>'+pierden.map(row).join('')+'</tbody></table></div><p class="hint" style="margin:6px 0 0">Incluye lo que perdiste por devoluciones/cancelaciones de ese producto y su parte de publicidad y Full.</p>':('<p class="hint" style="margin:0 0 8px">✅ Ninguno este mes. Estos son los que <b>menos margen</b> te dejan — vigílalos:</p><div class="tablewrap"><table>'+th+'<tbody>'+conCosto.slice().sort((a,b)=>a.mg-b.mg).slice(0,5).map(row).join('')+'</tbody></table></div>'))+'</div>';
+  const allHtml='<div class="card"><details><summary style="cursor:pointer;font-weight:600">📋 Utilidad de todos tus productos ('+D.L.length+')</summary><div class="tablewrap" style="max-height:55vh;margin-top:8px"><table>'+th+'<tbody>'+D.L.slice().sort((a,b)=>b.util-a.util).map(row).join('')+'</tbody></table></div><p class="hint" style="margin:6px 0 0">Publicidad, afiliados y suscripción se reparten según lo que vendió cada producto; el costo de Full, según las piezas que salieron por Full.</p></details></div>';
+  const sinHtml=sinC.length?('<div class="card" style="border:1px solid rgba(217,138,0,.4)"><h3 class="vh">⚠️ Vendiste estos productos y no tienen costo capturado</h3><p class="hint" style="margin:0 0 8px">Mientras no tengan costo, su utilidad sale inflada. Captúralo en <b>📦 Inventario</b> (o en tu hoja de inventario). Si es un kit/paquete, arma su receta en <b>🧩 Kits / Recetas</b> con las piezas que lleva.</p><div class="tablewrap"><table><thead><tr><th>SKU</th><th>Producto</th><th>Publicación</th><th>Vendidos</th><th>Vendiste</th></tr></thead><tbody>'+
+    sinC.sort((a,b)=>b.ing-a.ing).map(o=>'<tr><td><b>'+escapeHtml(o.s||'(sin SKU)')+'</b></td><td class="prod" style="max-width:340px">'+nm(o)+'</td><td>'+escapeHtml(o.p)+'</td><td>'+num.format(o.u)+'</td><td>'+mxn.format(o.ing)+'</td></tr>').join('')+'</tbody></table></div></div>'):'';
+  return pyl+concNegocioHtml(M,D)+insHtml+sinHtml+topHtml+pierHtml+allHtml;
+}
+/* ---- 🏦 Estado de cuenta del banco (PDF): retiros de MP, comisiones, contadora, SAT ---- */
+const BCATS={mp:'💰 Retiro de Mercado Pago',ing:'➕ Otro depósito (no cuenta)',banco:'🏦 Comisiones del banco',conta:'🧾 Contadora',nom:'👩‍💼 Nómina / sueldos',sat:'🏛️ Impuestos (SAT)',insumo:'🎀 Insumos / empaque',merc:'📦 Compra de mercancía (ya va en costo)',neg:'💼 Otro gasto del negocio',pers:'🙋‍♀️ Personal (no cuenta)','':'❓ Sin clasificar'};
+const BCAT_DEP=['mp','ing','pers'], BCAT_CAR=['','banco','conta','nom','sat','insumo','merc','neg','pers'];
+const MES_ES={ENERO:1,FEBRERO:2,MARZO:3,ABRIL:4,MAYO:5,JUNIO:6,JULIO:7,AGOSTO:8,SEPTIEMBRE:9,SETIEMBRE:9,OCTUBRE:10,NOVIEMBRE:11,DICIEMBRE:12};
+const MON3={ENE:1,FEB:2,MAR:3,ABR:4,MAY:5,JUN:6,JUL:7,AGO:8,SEP:9,SET:9,OCT:10,NOV:11,DIC:12};
+async function concPdfJs(){ if(window.pdfjsLib) return window.pdfjsLib;
+  await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; s.onload=res; s.onerror=()=>rej(new Error('no pude cargar el lector de PDF (¿hay internet?)')); document.head.appendChild(s); });
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; return window.pdfjsLib; }
+async function concPdfLines(buf){ const pdfjs=await concPdfJs(), doc=await pdfjs.getDocument({data:buf}).promise, lines=[];
+  for(let p=1;p<=doc.numPages;p++){ const tc=await (await doc.getPage(p)).getTextContent(), rows=[];
+    for(const it of tc.items){ if(!it.str||!it.str.trim()) continue; const y=it.transform[5]; let r=rows.find(r=>Math.abs(r.y-y)<2.5); if(!r){ r={y,its:[]}; rows.push(r); } r.its.push({x:it.transform[4],s:it.str,w:it.width||0}); }
+    rows.sort((a,b)=>b.y-a.y).forEach(r=>{ r.its.sort((a,b)=>a.x-b.x); let line='', end=null; for(const it of r.its){ if(end!=null&&it.x-end>1.2) line+=' '; line+=it.s; end=it.x+it.w; } lines.push(line.replace(/\s+/g,' ').trim()); }); }
+  return lines; }
+function concBancoKey(d){ return (''+d).toUpperCase().replace(/\d+[A-Z]{3}\d{4}/g,' ').replace(/\d+/g,' ').replace(/[^A-ZÁÉÍÓÚÑ*]+/g,' ').replace(/\s+/g,' ').trim().slice(0,60); }
+function concBancoAuto(mv){ const dd=mv.d.toUpperCase().replace(/\s+/g,'');
+  if(mv.t==='dep') return /MERCADO\*?PAGO/.test(dd)?'mp':'ing';
+  if(/COMISI[OÓ]N|COMISION/.test(dd)) return 'banco'; if(/CONTABILIDAD|CONTADOR/.test(dd)) return 'conta'; if(/PAGODEIMPUESTOS|SAT\b/.test(dd)) return 'sat'; return ''; }
+function concBancoParse(lines){
+  const all=lines.join(' '), per=all.match(/PERIODO:?\s*\d+\s*DE\s*([A-ZÁÉÍÓÚ]+)\s*AL\s*\d+\s*DE\s*([A-ZÁÉÍÓÚ]+)\s*DE\s*(\d{4})/i);
+  if(!per) throw new Error('no encontré el periodo del estado de cuenta');
+  const y=+per[3], mes=y+'-'+String(MES_ES[per[2].toUpperCase()]).padStart(2,'0');
+  let ini=null, saldo=null, cur=null, fin=false; const movs=[];
+  for(const l of lines){ if(fin) break;
+    if(ini==null){ const si=l.match(/^SALDO INICIAL \$ ?([\d,]+\.\d\d)/); if(si){ ini=saldo=cNum(si[1]); } continue; }
+    if(/^TOTAL DE MOVIMIENTOS|^SALDO FINAL/.test(l)){ fin=true; continue; }
+    const mm=l.match(/^(\d{1,2}) ([A-Z]{3}) (.*?)\$ ?([\d,]+\.\d\d) \$ ?([\d,]+\.\d\d)$/);
+    if(mm&&MON3[mm[2]]){ const amt=cNum(mm[4]), nuevo=cNum(mm[5]), dep=nuevo>saldo+0.001; saldo=nuevo;
+      cur={f:y+'-'+String(MON3[mm[2]]).padStart(2,'0')+'-'+mm[1].padStart(2,'0'),d:mm[3].replace(/^\d+\s*/,'').replace(/¢/g,'Ó').trim(),m:amt,t:dep?'dep':'car',x:''}; movs.push(cur); continue; }
+    if(/^(CONTINUA|ESTADO DE CUENTA|NUMERO DE CLIENTE|R\.F\.C|NO\. REF|FECHA DESCRIPCION|DOCTO|PERIODO)/.test(l)) continue;
+    if(cur&&cur.x.length<400) cur.x+=' '+l; }
+  if(ini==null||!movs.length) throw new Error('no encontré movimientos (¿es un estado de cuenta de BanBajío?)');
+  movs.forEach(mv=>{ mv.k=concBancoKey(mv.d); const r=(CONC.reglas||{})[mv.k], a=concBancoAuto(mv); mv.c=(r!=null&&a!=='mp'&&(mv.t==='dep'?BCAT_DEP:BCAT_CAR).includes(r))?r:a; });
+  return {mes,ini,fin:saldo,movs,cargado:isoDate(new Date())}; }
+function concMatchBanco(mes){ const B=CONC.banco&&CONC.banco[mes], M=CONC.meses[mes]; if(!B||!M) return; const used=new Set();
+  for(const r of M.retiros){ const i=B.movs.findIndex((mv,j)=>!used.has(j)&&mv.t==='dep'&&mv.c==='mp'&&Math.abs(mv.m-r.m)<cTOL&&(mv.x.includes('CPO'+r.id)||Math.abs((new Date(mv.f)-new Date(r.f))/864e5)<=4));
+    if(i>=0){ used.add(i); r.ok=true; r.fb=B.movs[i].f; } } }
+function concBancoSync(mes){ const B=CONC.banco&&CONC.banco[mes]; if(!B) return;
+  const arr=(GASTOSMES[mes]||[]).filter(g=>g.src!=='banco'), sum=c=>+B.movs.filter(mv=>mv.t==='car'&&mv.c===c).reduce((a,mv)=>a+mv.m,0).toFixed(2);
+  [['banco','Banco: comisiones (estado de cuenta)','fijo'],['conta','Contadora (estado de cuenta)','fijo'],['nom','Nómina / sueldos (estado de cuenta)','fijo'],['neg','Otros gastos del negocio (estado de cuenta)','fijo'],['insumo','Insumos (estado de cuenta)','insumo']]
+    .forEach(([c,lbl,t])=>{ const m=sum(c); if(m) arr.push({c:lbl,m,t,src:'banco'}); });
+  if(arr.length) GASTOSMES[mes]=arr; else delete GASTOSMES[mes]; saveJSON(LS_GASTOSMES,GASTOSMES); }
+async function concLoadBanco(f){ const B=concBancoParse(await concPdfLines(await f.arrayBuffer()));
+  CONC.banco=CONC.banco||{}; const old=CONC.banco[B.mes];
+  if(old) B.movs.forEach(mv=>{ const o=old.movs.find(z=>z.f===mv.f&&z.m===mv.m&&z.k===mv.k); if(o) mv.c=o.c; });
+  CONC.banco[B.mes]=B; concMatchBanco(B.mes); concBancoSync(B.mes); concSave(); return B; }
+function concBancoHtml(M){ const B=CONC.banco&&CONC.banco[M.mes];
+  if(!B) return '<div class="card"><h3 class="vh">🏦 Tu estado de cuenta</h3><p class="hint" style="margin:0">Sube el <b>PDF de tu estado de cuenta de '+concMesNombre(M.mes)+'</b> arriba (junto con los demás o solo). Con él confirmo tus retiros solos y sumo <b>comisiones del banco, contadora e impuestos</b> a la rentabilidad de tu negocio.</p></div>';
+  const car=B.movs.map((mv,i)=>[mv,i]).filter(([mv])=>mv.t==='car'), dep=B.movs.map((mv,i)=>[mv,i]).filter(([mv])=>mv.t==='dep');
+  const tot=c=>B.movs.filter(mv=>mv.c===c&&mv.t==='car').reduce((a,mv)=>a+mv.m,0), sinC=car.filter(([mv])=>!mv.c);
+  const sel=(mv,i,opts)=>'<select class="concBcat" data-i="'+i+'" style="max-width:250px'+(mv.c?'':';border-color:var(--warn)')+'">'+opts.map(c=>'<option value="'+c+'"'+(mv.c===c?' selected':'')+'>'+BCATS[c]+'</option>').join('')+'</select>';
+  const tr=([mv,i],opts)=>'<tr><td style="white-space:nowrap">'+escapeHtml(mv.f.slice(5).split('-').reverse().join('/'))+'</td><td style="max-width:380px;white-space:normal">'+escapeHtml(mv.d)+'</td><td'+(mv.t==='car'?' class="neg"':'')+'>'+(mv.t==='car'?'−':'+')+mxn2.format(mv.m)+'</td><td>'+sel(mv,i,opts)+'</td></tr>';
+  const res=['banco','conta','nom','sat','insumo','neg','merc','pers'].filter(c=>tot(c)).map(c=>'<span class="badge b-blue" style="margin:2px">'+BCATS[c]+': '+mxn2.format(tot(c))+'</span>').join(' ');
+  return '<div class="card"><h3 class="vh">🏦 Tu estado de cuenta — '+concMesNombre(B.mes)+' <span style="font-weight:400;color:var(--muted);font-size:12px">— dime qué es del negocio; lo recuerdo para los siguientes meses</span></h3>'+
+    '<p class="hint" style="margin:0 0 8px">Saldo '+mxn2.format(B.ini)+' → '+mxn2.format(B.fin)+' · '+B.movs.length+' movimientos. '+(sinC.length?'<b style="color:var(--warn)">❓ '+sinC.length+' cargos sin clasificar.</b>':'✅ Todo clasificado.')+'</p>'+
+    (res?'<div style="margin-bottom:8px">'+res+'</div>':'')+
+    '<div class="tablewrap" style="max-height:46vh"><table><thead><tr><th>Fecha</th><th>Cargo</th><th>Monto</th><th>¿Qué es?</th></tr></thead><tbody>'+car.map(z=>tr(z,BCAT_CAR)).join('')+'</tbody></table></div>'+
+    '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:600">➕ Depósitos ('+dep.length+')</summary><div class="tablewrap" style="max-height:34vh;margin-top:6px"><table><thead><tr><th>Fecha</th><th>Depósito</th><th>Monto</th><th>¿Qué es?</th></tr></thead><tbody>'+dep.map(z=>tr(z,BCAT_DEP)).join('')+'</tbody></table></div></details>'+
+    '<p class="hint" style="margin:6px 0 0">Comisiones del banco, contadora, insumos y otros gastos del negocio se pasan solos a tus <b>Gastos del mes</b> (📊 Resumen). Lo personal y las compras de mercancía no cuentan como gasto (la mercancía ya va en el costo de lo que vendes).</p></div>'; }
+
+function concNegocioHtml(M,D){ const B=CONC.banco&&CONC.banco[M.mes], fij=mesTotal(M.mes,'fijo'), ins=mesTotal(M.mes,'insumo');
+  const sat=B?B.movs.filter(mv=>mv.t==='car'&&mv.c==='sat').reduce((a,mv)=>a+mv.m,0):0, pers=B?B.movs.filter(mv=>mv.t==='car'&&mv.c==='pers').reduce((a,mv)=>a+mv.m,0):0;
+  const sinC=B?B.movs.filter(mv=>mv.t==='car'&&!mv.c):[], antes=D.T.util-fij-ins, neta=antes-sat, mg=D.ingOk?neta/D.ingOk*100:0;
+  const det=(GASTOSMES[M.mes]||[]).filter(g=>parseNum(g.m)).map(g=>escapeHtml(g.c||'(sin nombre)')+' '+mxn.format(parseNum(g.m))).join(' · ');
+  return '<div class="card" style="border:2px solid var(--accent)"><h3 class="vh">🏢 Rentabilidad de tu negocio (Mercado Libre) — '+concMesNombre(M.mes)+'</h3><div class="funnel">'+
+    '<div class="line"><span>Utilidad real de Mercado Libre</span><b>'+mxn.format(D.T.util)+'</b></div>'+
+    '<div class="line"><span>− Gastos fijos (contadora, banco, nómina…)'+(det?'<br><span style="color:var(--muted);font-size:12px">'+det+'</span>':'')+'</span><b class="neg">−'+mxn.format(fij)+'</b></div>'+
+    (ins?'<div class="line"><span>− Insumos del mes</span><b class="neg">−'+mxn.format(ins)+'</b></div>':'')+
+    '<div class="line"><span>= Utilidad antes de impuestos</span><b>'+mxn.format(antes)+'</b></div>'+
+    '<div class="line"><span>− Impuestos pagados al SAT este mes</span><b class="neg">−'+mxn.format(sat)+'</b></div>'+
+    '<div class="line big"><span>💰 Utilidad NETA del negocio · '+mg.toFixed(1)+'% de tus ventas</span><b class="'+(neta>=0?'pos':'neg')+'">'+mxn.format(neta)+'</b></div></div>'+
+    '<p class="foot">'+(B?'':'⚠️ Sube tu estado de cuenta para sumar banco, contadora e impuestos. ')+(!fij&&!B?'No tienes gastos fijos capturados para este mes. ':'')+
+    (sinC.length?'<b style="color:var(--warn)">❓ Tienes '+sinC.length+' cargos del banco sin clasificar ('+mxn.format(sinC.reduce((a,mv)=>a+mv.m,0))+'): clasifícalos abajo. </b>':'')+
+    (pers?'No conté '+mxn.format(pers)+' de gastos personales. ':'')+(M.reten?'Ojo: ML ya te retuvo '+mxn.format(M.reten)+' de ISR/IVA que se acreditan contra esos impuestos. ':'')+'No incluye Amazon.</p></div>'; }
+function renderConc(){ const v=$('view-conc'); if(!v) return; CONC=loadJSON(LS_CONC,CONC); CONC.meses=CONC.meses||{};
+  const meses=Object.keys(CONC.meses).sort().reverse(); if(!CONCSEL||!CONC.meses[CONCSEL]) CONCSEL=meses[0]||'';
+  v.innerHTML=concUploadHtml()+(CONCSEL?concMesHtml(CONC.meses[CONCSEL],meses):'<div class="card"><p class="hint" style="margin:0">Aún no has conciliado ningún mes. Sube tus reportes arriba y dale <b>Conciliar ▸</b>.</p></div>'); }
+async function concLoadFiles(files){ const msg=$('concMsg'); const raros=[];
+  const oks=[];
+  for(const f of files){ if(/\.pdf$/i.test(f.name)){ try{ msg.innerHTML='⏳ Leyendo tu estado de cuenta…'; const B=await concLoadBanco(f); CONCFILES.banco={name:f.name}; oks.push('✅ Estado de cuenta de <b>'+concMesNombre(B.mes)+'</b>: '+B.movs.length+' movimientos'); if(CONC.meses[B.mes]) CONCSEL=B.mes; }catch(e){ console.error(e); raros.push(f.name+' ('+(e.message||e)+')'); } continue; }
+    try{ const rows=/\.xlsx$/i.test(f.name)?await parseXLSX(await f.arrayBuffer()):null; const t=rows?concDetect(rows):''; if(t) CONCFILES[t]={name:f.name,rows}; else raros.push(f.name); }
+    catch(e){ raros.push(f.name+' ('+(e.message||e)+')'); } }
+  $('concFileList').innerHTML=concFileListHtml();
+  if(oks.length&&!Object.keys(CONCFILES).some(t=>t!=='banco')){ renderConc(); renderResumen(); }
+  else $('concFileList').innerHTML=concFileListHtml();
+  const m2=$('concMsg'); if(m2) m2.innerHTML=oks.join('<br>')+(oks.length&&raros.length?'<br>':'')+(raros.length?('ℹ️ Estos no los necesito (o no los reconocí): '+raros.map(escapeHtml).join(', ')):''); }
+function concRun(){ const msg=$('concMsg'), falta=['ventas','trans','lib','ret'].filter(t=>!CONCFILES[t]);
+  if(falta.length){ msg.innerHTML='⚠️ Me falta: <b>'+falta.map(t=>CONC_TIPOS[t]).join(', ')+'</b>'; return; }
+  try{ const F={}; for(const t in CONCFILES){ if(CONCFILES[t].rows) F[t]=cTable(CONCFILES[t].rows,CONC_MARK[t]); }
+    const M=concCompute(F); if(!M.mes) throw new Error('no pude leer el mes del reporte de Liberaciones');
+    if(CONC.meses[M.mes]&&!confirm('Ya tienes conciliado '+concMesNombre(M.mes)+'. ¿Lo reemplazo con estos reportes? (tus palomitas del banco se conservan)')) return;
+    CONC.meses[M.mes]=M; CONCSEL=M.mes; CONCFILES={}; concMatchBanco(M.mes); concSave(); renderConc(); renderResumen();
+  }catch(e){ console.error(e); msg.innerHTML='⚠️ No pude conciliar: '+escapeHtml(e.message||e); } }
+$('view-conc').addEventListener('change',e=>{
+  if(e.target.id==='concFiles') concLoadFiles([...e.target.files]);
+  if(e.target.id==='concSusc'){ CONC.susc=cNum(e.target.value); concSave(); }
+  if(e.target.classList.contains('concBcat')){ const B=CONC.banco&&CONC.banco[CONCSEL], mv=B&&B.movs[+e.target.dataset.i]; if(!mv) return;
+    const c=e.target.value; CONC.reglas=CONC.reglas||{}; CONC.reglas[mv.k]=c;
+    B.movs.forEach(z=>{ if(z.k===mv.k&&z.t===mv.t) z.c=c; }); concMatchBanco(CONCSEL); concBancoSync(CONCSEL); concSave(); renderConc(); renderResumen(); }
+  if(e.target.classList.contains('concRetOk')){ const M=CONC.meses[CONCSEL]; if(M&&M.retiros[+e.target.dataset.i]){ M.retiros[+e.target.dataset.i].ok=e.target.checked; concSave(); renderConc(); } } });
+$('view-conc').addEventListener('click',e=>{
+  if(e.target.id==='concRun') return concRun();
+  if(e.target.id==='concAll'){ CONCALL=!CONCALL; return renderConc(); }
+  const mb=e.target.closest('.concMes'); if(mb){ CONCSEL=mb.dataset.m; CONCALL=false; return renderConc(); }
+  if(e.target.id==='concDel'&&CONCSEL&&confirm('¿Borrar la conciliación de '+concMesNombre(CONCSEL)+'?')){ delete CONC.meses[CONCSEL]; CONCSEL=''; concSave(); renderConc(); renderResumen(); } });
+
+function refresh(){ recomputeLive(); ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderAmzRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); renderDevol(); renderConc(); }
 function showTab(name){ TAB=name; document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hide',v.id!=='view-'+name)); }
 
 /* ---------- carga ventas ---------- */
@@ -1296,7 +1634,7 @@ $('provExport').onclick=()=>dl('pedido-proveedor.csv',['SKU','Producto','Vendido
 $('invExport').onclick=()=>dl('inventario.csv',['SKU','Producto','Bodega','Full','FBA','EnCamino','Total','CostoU','Valor'],COMPUTED.filter(p=>p.inv).sort((a,b)=>b.valorInv-a.valorInv).map(p=>[p.key,p.nombre,p.bodega,p.full,p.fba,p.camino,p.total,round2(p.costo),round2(p.valorInv)]));
 
 /* ---------- respaldo / portabilidad ---------- */
-const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_AMZ,LS_AMZSALES,LS_AMZSKUMAP,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED,LS_DEVOL,LS_RECSPLIT,LS_ZAPMAN];
+const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_AMZ,LS_AMZSALES,LS_AMZSKUMAP,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED,LS_DEVOL,LS_RECSPLIT,LS_ZAPMAN,LS_CONC];
 function hacerBackup(){ const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
   const blob=new Blob([JSON.stringify({app:'wedding-shop-erp',v:3,fecha:hoy(),data})],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='wedding-erp-respaldo-'+hoy()+'.json'; a.click();
@@ -1324,6 +1662,8 @@ $('pasteToggle').onclick=()=>$('pasteBox').classList.toggle('hide');
 $('pasteLoad').onclick=()=>{ const t=$('pasteArea').value; if(t.trim()) onData(parseCSV(t)); };
 $('exampleBtn').onclick=loadExample; $('applyMap').onclick=applyMapping;
 ['comPct','comFija','envio','empaqueU','reabWin','targetFull','targetTotal','umbralMargen','minSeed'].forEach(id=>$(id).addEventListener('input',()=>{saveCfg(); if(COMPUTED.length)refresh();}));
+$('concGoRestore').addEventListener('click',()=>{ const f=$('restoreFile'); f.scrollIntoView({block:'center'}); f.click(); });
+$('concOpenNow').addEventListener('click',()=>{ $('dataPanel').classList.add('hide'); $('mtabs').classList.remove('hide'); const ph=$('placeholder'); if(ph) ph.classList.add('hide'); renderConc(); showTab('conc'); window.scrollTo(0,0); });
 $('mtabs').addEventListener('click',e=>{ const t=e.target.closest('.mtab'); if(t) showTab(t.dataset.tab); });
 $('rentabHead').addEventListener('click',e=>{ const th=e.target.closest('th'); if(!th||!th.dataset.k) return; const k=th.dataset.k; if(RSORT.key===k) RSORT.dir*=-1; else RSORT={key:k,dir:-1}; renderRentab(); });
 $('invHead').addEventListener('click',e=>{ const th=e.target.closest('th'); if(!th||!th.dataset.k) return; const k=th.dataset.k; if(INVSORT.key===k) INVSORT.dir*=-1; else INVSORT={key:k,dir:-1}; renderInventario(); });
