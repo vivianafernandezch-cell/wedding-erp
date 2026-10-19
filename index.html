@@ -182,6 +182,7 @@
       <div class="row" style="margin-top:10px">
         <label class="field"><b>🗓️ Ventas recientes para reabasto (días, por defecto)</b><input type="number" id="reabWin" value="30" min="1" step="1"></label>
         <label class="field"><b>📤 Mantener en Full (días de venta)</b><input type="number" id="targetFull" value="30" min="1" step="1"></label>
+        <label class="field" title="Días desde que mandas a Full hasta que ML lo tiene disponible. Con 0 el cálculo queda igual que antes."><b>🚚 Días que tarda en llegar a Full</b><input type="number" id="leadFull" value="0" min="0" step="1"></label>
         <label class="field"><b>🛒 Pedir si el total baja de (días)</b><input type="number" id="targetTotal" value="45" min="1" step="1"></label>
         <label class="field"><b>Margen "bajo" si < (%)</b><input type="number" id="umbralMargen" value="15" min="0" step="1"></label>
         <label class="field"><b>📤 Reactivar agotados: mandar mínimo (uds)</b><input type="number" id="minSeed" value="2" min="0" step="1"></label>
@@ -608,7 +609,7 @@ function addMov(o){ MOVS.push(Object.assign({id:movId(),ts:Date.now(),fecha:hoy(
 
 function compute(){
   const comPct=parseNum($('comPct').value), comFija=parseNum($('comFija').value), envioU=parseNum($('envio').value), empaqueU=parseNum($('empaqueU').value)||0;
-  const targetFull=Math.max(1,parseNum($('targetFull').value));
+  const targetFull=Math.max(1,parseNum($('targetFull').value)), leadFull=Math.max(0,parseNum($('leadFull')?$('leadFull').value:0)||0), tgtFull=targetFull+leadFull;   // meta en Full + días que tarda en llegar
   const targetTotal=Math.max(1,parseNum($('targetTotal').value));
   const umbralMargen=parseNum($('umbralMargen').value);
   const minSeed=$('minSeed')?Math.max(0,parseNum($('minSeed').value)):2;
@@ -661,7 +662,7 @@ function compute(){
     let enviarFull=0, faltaBodega=0, needFull=false;
     if(hasFull(p) && velUdsFull>0){   // solo planeamos Full si ESTE SKU se vende por Full
       const agotado=(full+camino)<=0; let need=0;
-      if(velDiaFull>0 && covFull<targetFull) need=Math.max(0,Math.ceil(velDiaFull*targetFull)-full-camino);
+      if(velDiaFull>0 && covFull<tgtFull) need=Math.max(0,Math.ceil(velDiaFull*tgtFull)-full-camino);
       if(agotado && bodega>0) need=Math.max(need,minSeed);
       if(need>0){ enviarFull=Math.min(need,Math.max(0,bodega)); faltaBodega=Math.max(0,need-enviarFull); needFull=true; }
     }
@@ -889,18 +890,19 @@ function renderReabasto(){
   const winTxt='Ritmo medido con tus ventas del <b>'+fechaCorta(REABINFO.from)+'</b> al <b>'+fechaCorta(REABINFO.to)+'</b> ('+REABINFO.win+' días) — ajústalo aquí arriba 👆.';
   if($('reabWinNote')) $('reabWinNote').innerHTML='🏬 Cuenta <b>solo lo vendido por Mercado Envíos Full</b> (lo que mandas desde bodega no vacía tu Full; y las piezas sueltas de un kit no cuentan aquí). '+winTxt;
   if($('reabWinNote2')) $('reabWinNote2').innerHTML='📦 Cuenta <b>todas</b> las piezas que repones (Full + bodega, e incluye las piezas que consumen tus kits). '+winTxt;
-  const fRows=sortRows(COMPUTED.filter(p=>p.enviarFull>0&&!HIDDEN.has(p.key)&&_m(p)), FSORT.key, FSORT.dir);
+  const fRows=sortRows(COMPUTED.filter(p=>(p.enviarFull>0||(p.needFull&&p.faltaBodega>0))&&!HIDDEN.has(p.key)&&_m(p)), FSORT.key, FSORT.dir);   // también los que se necesitan aunque no haya en bodega
   $('fullHead').innerHTML=thS('Publicación (Full)','nombre',FSORT)+thS('Vendido en Full','velUdsFull',FSORT)+thS('En Full','full',FSORT)+thS('Días Full','covFull',FSORT)+thS('En camino','camino',FSORT)+thS('En bodega','bodega',FSORT)+thS('📤 Enviar a Full','enviarFull',FSORT);
   $('fullBody').innerHTML=fRows.map(p=>{
-    const falta=p.faltaBodega>0?` <span class="badge b-bad">faltan ${num.format(p.faltaBodega)}</span>`:'';
+    const falta=p.faltaBodega>0?(p.enviarFull>0?` <span class="badge b-bad">faltan ${num.format(p.faltaBodega)}</span>`:`<span class="badge b-bad" title="Tu bodega no tiene piezas para mandar: pide al proveedor o prodúcelas">sin bodega · pide/produce ${num.format(p.faltaBodega)}</span>`):'';
     return `<tr>${prodCellFull(p)}
       <td>${num.format(p.velUdsFull)}</td><td>${num.format(p.full)}</td>
       <td>${p.agotadoFull?'<span class="badge b-bad">agotado</span>':'<span class="badge b-warn">'+covTxt(p.covFull)+' d</span>'}</td>
       <td>${p.camino?num.format(p.camino):'—'}</td><td>${num.format(p.bodega)}</td>
-      <td class="send">+${num.format(p.enviarFull)}${falta}</td></tr>`;
+      <td class="send">${p.enviarFull>0?'+'+num.format(p.enviarFull):''}${falta}</td></tr>`;
   }).join('')||`<tr><td colspan="7" class="empty">Nada urgente por mandar a Full. 🎉</td></tr>`;
   const totEnv=fRows.reduce((a,p)=>a+p.enviarFull,0);
-  $('fullFoot').innerHTML=fRows.length?`Total a enviar de tu bodega a Full: <b>${num.format(totEnv)} piezas</b> en ${fRows.length} productos.`:'';
+  const sinB=fRows.filter(p=>p.enviarFull<=0).length, totFal=fRows.reduce((a,p)=>a+(p.faltaBodega||0),0);
+  $('fullFoot').innerHTML=fRows.length?`Total a enviar de tu bodega a Full: <b>${num.format(totEnv)} piezas</b> en ${fRows.length-sinB} productos.`+(totFal?` · <span style="color:var(--bad)">Te faltan <b>${num.format(totFal)} piezas</b> que no tienes en bodega${sinB?' ('+sinB+' productos sin nada en bodega)':''}: pídelas o prodúcelas.</span>`:''):'';
 
   const pRows=sortRows(COMPUTED.filter(p=>p.needProv&&!HIDDEN.has(p.key)&&_m(p)), PSORT.key, PSORT.dir);
   $('provHead').innerHTML=thS('Producto','nombre',PSORT)+thS('Vendido total','velUds',PSORT)+thS('En Full','full',PSORT)+thS('En bodega','bodega',PSORT)+thS('Total','total',PSORT)+thS('Días total','covTotal',PSORT)+thS('🛒 Pedir','pedirProv',PSORT)+thS('Costo/u','costo',PSORT)+'<th>Inversión</th>';
@@ -1578,7 +1580,7 @@ function applyMapping(){ if(!MAPPING.unidades){alert('Falta "Unidades vendidas".
   $('mtabs').classList.remove('hide'); $('dataPanel').classList.add('hide'); $('placeholder').classList.add('hide'); document.querySelectorAll('.view').forEach(v=>v.classList.add('hide'));
   saveCfg(); refresh(); showTab('resumen'); window.scrollTo(0,0); }
 
-function saveCfg(){ const c={}; ['comPct','comFija','envio','empaqueU','reabWin','targetFull','targetTotal','umbralMargen','minSeed'].forEach(id=>c[id]=$(id).value); saveJSON(LS_CFG,c); }
+function saveCfg(){ const c={}; ['comPct','comFija','envio','empaqueU','reabWin','targetFull','leadFull','targetTotal','umbralMargen','minSeed'].forEach(id=>c[id]=$(id).value); saveJSON(LS_CFG,c); }
 function loadCfg(){ const c=loadJSON(LS_CFG,null); if(!c) return; Object.keys(c).forEach(id=>{ if($(id)) $(id).value=c[id]; }); }
 
 /* ---------- importadores ---------- */
@@ -1808,7 +1810,7 @@ $('file').addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f)
 $('pasteToggle').onclick=()=>$('pasteBox').classList.toggle('hide');
 $('pasteLoad').onclick=()=>{ const t=$('pasteArea').value; if(t.trim()) onData(parseCSV(t)); };
 $('exampleBtn').onclick=loadExample; $('applyMap').onclick=applyMapping;
-['comPct','comFija','envio','empaqueU','reabWin','targetFull','targetTotal','umbralMargen','minSeed'].forEach(id=>$(id).addEventListener('input',()=>{saveCfg(); if(COMPUTED.length)refresh();}));
+['comPct','comFija','envio','empaqueU','reabWin','targetFull','leadFull','targetTotal','umbralMargen','minSeed'].forEach(id=>$(id).addEventListener('input',()=>{saveCfg(); if(COMPUTED.length)refresh();}));
 $('concGoRestore').addEventListener('click',()=>{ const f=$('restoreFile'); f.scrollIntoView({block:'center'}); f.click(); });
 $('concOpenNow').addEventListener('click',()=>{ $('dataPanel').classList.add('hide'); $('mtabs').classList.remove('hide'); const ph=$('placeholder'); if(ph) ph.classList.add('hide'); renderConc(); showTab('conc'); window.scrollTo(0,0); });
 $('mtabs').addEventListener('click',e=>{ const t=e.target.closest('.mtab'); if(t) showTab(t.dataset.tab); });
