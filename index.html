@@ -318,7 +318,7 @@ let CUADREMODE=loadJSON(LS_CUADRE,false);   // modo cuadre: mientras está ON, c
 let SALES=loadJSON(LS_SALES,[]), SALEFILTER=loadJSON(LS_SALEFILTER,null), INVCORTE=loadJSON(LS_INVCORTE,'');
 let DEVOL=loadJSON(LS_DEVOL,[]); DEVOL.forEach(d=>{ if(d.rec===undefined) d.rec='auto'; });   // devoluciones/cancelaciones detectadas al subir ventas
 let GASTOSMES=loadJSON(LS_GASTOSMES,{}), GMSEL="";
-const LS_CONC="ml_conc_v3"; let CONC=loadJSON(LS_CONC,{susc:399,meses:{}}), CONCSEL="", CONCFILES={}, CONCALL=false, CONCD={};   // 🏦 conciliación ML ↔ Mercado Pago ↔ banco
+const LS_CONC="ml_conc_v3"; let CONC=loadJSON(LS_CONC,{susc:399,meses:{}}), CONCSEL="", CONCFILES={}, CONCALL=false, CONCD={}, CONCROW=null, CONCPS={k:'util',d:-1}, CONCPQ='', CONCPOPEN=false, CONCVS={k:'i',d:1}, CONCVQ='';   // 🏦 conciliación ML ↔ Mercado Pago ↔ banco
 let REABINFO={win:30,from:'',to:''};   // ventana usada para el reabasto (info para mostrar)
 let REABRANGE=loadJSON(LS_REABRANGE,null);   // rango de fechas manual del reabasto (si lo fija desde la pestaña); null = últimos N días
 let FOTOS=loadJSON(LS_FOTOS,{});   // {sku: url de foto} — se muestra como miniatura; se sincroniza
@@ -1254,11 +1254,9 @@ function concMesHtml(M,meses){
     '<div class="line"><span>Saldo al inicio del mes</span><b>'+mxn2.format(M.ini)+'</b></div>'+
     M.flujo.map(f=>concFluLine(M,f)).join('')+
     '<div class="line big"><span>= Saldo al cierre '+(M.cuadra?'✅ cuadra al centavo':'❌ no cuadra')+'</span><b>'+mxn2.format(M.fin)+'</b></div></div></div>';
-  const vs=CONCALL?M.ventas:M.ventas.filter(x=>x.s[0]!=='g'||/anulado/.test(x.s));
   const venHtml='<div class="card"><h3 class="vh">🧾 Venta por venta <span style="font-weight:400;color:var(--muted);font-size:12px">— '+(CONCALL?'todas':'solo las que tienen algo que ver')+'</span> <button class="btn ghost sm" id="concAll" style="margin-left:8px">'+(CONCALL?'Ver solo pendientes':'Ver las '+n)+'</button></h3>'+
-    '<div class="tablewrap" style="max-height:52vh"><table><thead><tr><th># de venta</th><th>Fecha</th><th>Estado</th><th>Total ML</th><th>Total MP</th><th>Diferencia</th><th>Liberado</th><th>Por liberar</th><th>Semáforo</th></tr></thead><tbody>'+
-    (vs.length?vs.map(x=>'<tr><td style="white-space:nowrap">'+escapeHtml(x.id)+'</td><td style="white-space:nowrap">'+escapeHtml((x.f||'').replace(/ de 20\d\d.*$/,''))+'</td><td style="max-width:240px">'+escapeHtml(x.e)+(x.d?'<br><span style="color:var(--muted);font-size:12px">'+escapeHtml(x.d)+'</span>':'')+'</td><td>'+mxn2.format(x.ml)+'</td><td>'+(x.mp==null?'—':mxn2.format(x.mp))+'</td><td class="'+(Math.abs(x.dif)>cTOL?'neg':'')+'">'+mxn2.format(x.dif)+'</td><td>'+mxn2.format(x.lib)+'</td><td>'+(x.pend>cTOL?mxn2.format(x.pend):'—')+'</td><td>'+concBadge(x.s)+'</td></tr>').join(''):'<tr><td colspan="9" class="hint">Nada pendiente 🎉</td></tr>')+
-    '</tbody></table></div></div>';
+    '<input type="search" id="concVenQ" value="'+escapeHtml(CONCVQ)+'" placeholder="🔍 Buscar # de venta, estado o semáforo… (busca en todas)" style="width:340px;max-width:100%;margin:0 0 8px">'+
+    '<div class="tablewrap" style="max-height:52vh"><table><thead id="concVenHead">'+concVenHead()+'</thead><tbody id="concVenBody">'+concVenRows(M)+'</tbody></table></div></div>';
   const cosHtml=cs?('<div class="card"><h3 class="vh">📣 Lo que te cuesta vender en ML este mes</h3><div class="funnel">'+
     '<div class="line"><span>Ventas brutas de productos</span><b>'+mxn2.format(M.bruto)+'</b></div>'+
     [['Comisión por venta (neto de anulaciones)',cs.comision],['Envíos de Mercado Libre (neto de anulaciones)',cs.envios],['Publicidad (Product Ads)',cs.publicidad],['Full: almacenamiento',cs.fullAlm],['Full: colecta',cs.fullCol],['Afiliados',cs.afil],['Suscripción (tu tarjeta)',M.susc||0]].filter(r=>r[1]).map(r=>'<div class="line"><span>− '+r[0]+' <span style="color:var(--muted);font-size:12px">'+(M.bruto?(r[1]/M.bruto*100).toFixed(1)+'%':'')+'</span></span><b class="neg">−'+mxn2.format(r[1])+'</b></div>').join('')+
@@ -1350,7 +1348,10 @@ function concDecisionHtml(M){
   const th='<thead><tr><th>Producto</th><th>Vendidos</th><th>Vendiste</th><th>Costo c/u</th><th>Utilidad real</th><th>Margen</th><th>Te deja c/u</th></tr></thead>';
   const topHtml='<div class="card"><h3 class="vh">🏆 Top 5 que más utilidad te dejan</h3><div class="tablewrap"><table>'+th+'<tbody>'+(top.length?top.map(row).join(''):'<tr><td colspan="7" class="hint">Captura costos para ver tu top.</td></tr>')+'</tbody></table></div></div>';
   const pierHtml='<div class="card" style="'+(pierden.length?'border:1px solid rgba(214,69,69,.35)':'')+'"><h3 class="vh">'+(pierden.length?'🚨 Productos que te hicieron perder dinero':'🔻 Productos que menos te dejan')+'</h3>'+(pierden.length?'<div class="tablewrap"><table>'+th+'<tbody>'+pierden.map(row).join('')+'</tbody></table></div><p class="hint" style="margin:6px 0 0">Incluye lo que perdiste por devoluciones/cancelaciones de ese producto y su parte de publicidad y Full.</p>':('<p class="hint" style="margin:0 0 8px">✅ Ninguno este mes. Estos son los que <b>menos margen</b> te dejan — vigílalos:</p><div class="tablewrap"><table>'+th+'<tbody>'+conCosto.slice().sort((a,b)=>a.mg-b.mg).slice(0,5).map(row).join('')+'</tbody></table></div>'))+'</div>';
-  const allHtml='<div class="card"><details><summary style="cursor:pointer;font-weight:600">📋 Utilidad de todos tus productos ('+D.L.length+') <span style="font-weight:400;color:var(--muted);font-size:12px">— pícale a cualquiera para ver venta por venta</span></summary><div class="tablewrap" style="max-height:55vh;margin-top:8px"><table>'+th+'<tbody>'+D.L.slice().sort((a,b)=>b.util-a.util).map(row).join('')+'</tbody></table></div><p class="hint" style="margin:6px 0 0">La publicidad se reparte solo entre las ventas que llegaron por anuncio (📣); afiliados y suscripción, según lo que vendió cada producto; el costo de Full, según las piezas que salieron por Full.</p></details></div>';
+  CONCROW=row;
+  const allHtml='<div class="card"><details id="concAllDet"'+(CONCPOPEN?' open':'')+'><summary style="cursor:pointer;font-weight:600">📋 Utilidad de todos tus productos ('+D.L.length+') <span style="font-weight:400;color:var(--muted);font-size:12px">— pícale a un título para ordenar, o a un producto para ver venta por venta</span></summary>'+
+    '<input type="search" id="concProdQ" value="'+escapeHtml(CONCPQ)+'" placeholder="🔍 Buscar producto, SKU o publicación…" style="width:320px;max-width:100%;margin:10px 0 6px">'+
+    '<div class="tablewrap" style="max-height:60vh"><table><thead id="concAllHead">'+concProdHead()+'</thead><tbody id="concAllBody">'+concAllRows()+'</tbody></table></div><p class="hint" style="margin:6px 0 0">La publicidad se reparte solo entre las ventas que llegaron por anuncio (📣); afiliados y suscripción, según lo que vendió cada producto; el costo de Full, según las piezas que salieron por Full.</p></details></div>';
   const sinHtml=sinC.length?('<div class="card" style="border:1px solid rgba(217,138,0,.4)"><h3 class="vh">⚠️ Vendiste estos productos y no tienen costo capturado</h3><p class="hint" style="margin:0 0 8px">Mientras no tengan costo, su utilidad sale inflada. Captúralo en <b>📦 Inventario</b> (o en tu hoja de inventario). Si es un kit/paquete, arma su receta en <b>🧩 Kits / Recetas</b> con las piezas que lleva.</p><div class="tablewrap"><table><thead><tr><th>SKU</th><th>Producto</th><th>Publicación</th><th>Vendidos</th><th>Vendiste</th></tr></thead><tbody>'+
     sinC.sort((a,b)=>b.ing-a.ing).map(o=>'<tr><td><b>'+escapeHtml(o.s||'(sin SKU)')+'</b></td><td class="prod" style="max-width:340px">'+escapeHtml(o.t)+(o.va&&o.va!=='-'?' <span style="color:var(--muted);font-size:12px">'+escapeHtml(o.va)+'</span>':'')+'</td><td>'+escapeHtml(o.p)+'</td><td>'+num.format(o.u)+'</td><td>'+mxn.format(o.ing)+'</td></tr>').join('')+'</tbody></table></div></div>'):'';
   return pyl+concNegocioHtml(M,D)+insHtml+sinHtml+topHtml+pierHtml+allHtml;
@@ -1429,6 +1430,29 @@ function concNegocioHtml(M,D){ const B=CONC.banco&&CONC.banco[M.mes], fij=mesTot
     '<p class="foot">'+(dupG.length?'<b style="color:var(--bad)">⚠️ Puede haber gasto doble: además del estado de cuenta tienes capturado a mano '+dupG.map(g=>'"'+escapeHtml(g.c)+'"').join(', ')+'. Si es lo mismo, bórralo en Gastos del mes (📊 Resumen). </b>':'')+(B?'':'⚠️ Sube tu estado de cuenta para sumar banco, contadora e impuestos. ')+(!fij&&!B?'No tienes gastos fijos capturados para este mes. ':'')+
     (sinC.length?'<b style="color:var(--warn)">❓ Tienes '+sinC.length+' cargos del banco sin clasificar ('+mxn.format(sinC.reduce((a,mv)=>a+mv.m,0))+'): clasifícalos abajo. </b>':'')+
     (pers?'No conté '+mxn.format(pers)+' de gastos personales. ':'')+(M.reten?'Ojo: ML ya te retuvo '+mxn.format(M.reten)+' de ISR/IVA que se acreditan contra esos impuestos. ':'')+'No incluye Amazon.</p></div>'; }
+function concTh(cols,st,attr){ return '<tr>'+cols.map(([k,t])=>'<th '+attr+'="'+k+'" style="cursor:pointer;white-space:nowrap" title="Ordenar">'+t+(st.k===k?(st.d<0?' ▾':' ▴'):' <span style="opacity:.35">↕</span>')+'</th>').join('')+'</tr>'; }
+const CONC_PCOLS=[['nom','Producto'],['u','Vendidos'],['ing','Vendiste'],['cu','Costo c/u'],['util','Utilidad real'],['mg','Margen'],['cuU','Te deja c/u']];
+function concProdHead(){ return concTh(CONC_PCOLS,CONCPS,'data-ck'); }
+function concAllRows(){ if(!CONCROW) return ''; const q=norm(CONCPQ||''), k=CONCPS.k, d=CONCPS.d;
+  let L=Object.values(CONCD); if(q) L=L.filter(o=>norm([o.nom,o.p,o.va,...(o.skus?[...o.skus]:[o.s])].join(' ')).includes(q));
+  const val=o=>k==='nom'?(o.nom||''):k==='cuU'?(o.u?o.util/o.u:-1e12):(o[k]||0);
+  L.sort((a,b)=>{ const x=val(a), y=val(b); return (typeof x==='string'?x.localeCompare(y,'es'):(x-y))*d; });
+  return L.length?L.map(CONCROW).join(''):'<tr><td colspan="7" class="hint">Sin resultados para "'+escapeHtml(CONCPQ)+'".</td></tr>'; }
+const CONC_VCOLS=[['id','# de venta'],['i','Fecha'],['e','Estado'],['ml','Total ML'],['mp','Total MP'],['dif','Diferencia'],['lib','Liberado'],['pend','Por liberar'],['s','Semáforo']];
+function concVenHead(){ return concTh(CONC_VCOLS,CONCVS,'data-cv'); }
+function concVenRows(M){ if(!M) return ''; const q=norm(CONCVQ||''), k=CONCVS.k, d=CONCVS.d;
+  let V=M.ventas.map((x,i)=>({...x,i}));
+  if(q) V=V.filter(x=>norm([x.id,x.f,x.e,x.d,x.s.slice(2)].join(' ')).includes(q)); else if(!CONCALL) V=V.filter(x=>x.s[0]!=='g'||/anulado/.test(x.s));
+  V.sort((a,b)=>{ const x=k==='e'||k==='id'||k==='s'?(''+(a[k]||'')):(a[k]==null?-1e12:a[k]), y=k==='e'||k==='id'||k==='s'?(''+(b[k]||'')):(b[k]==null?-1e12:b[k]); return (typeof x==='string'?x.localeCompare(y,'es'):(x-y))*d; });
+  if(!V.length) return '<tr><td colspan="9" class="hint">'+(q?'Sin resultados para "'+escapeHtml(CONCVQ)+'".':'Nada pendiente 🎉')+'</td></tr>';
+  return V.map(x=>'<tr><td style="white-space:nowrap">'+escapeHtml(x.id)+'</td><td style="white-space:nowrap">'+escapeHtml((x.f||'').replace(/ de 20\d\d.*$/,''))+'</td><td style="max-width:240px">'+escapeHtml(x.e)+(x.d?'<br><span style="color:var(--muted);font-size:12px">'+escapeHtml(x.d)+'</span>':'')+'</td><td>'+mxn2.format(x.ml)+'</td><td>'+(x.mp==null?'—':mxn2.format(x.mp))+'</td><td class="'+(Math.abs(x.dif)>cTOL?'neg':'')+'">'+mxn2.format(x.dif)+'</td><td>'+mxn2.format(x.lib)+'</td><td>'+(x.pend>cTOL?mxn2.format(x.pend):'—')+'</td><td>'+concBadge(x.s)+'</td></tr>').join(''); }
+$('view-conc').addEventListener('input',e=>{
+  if(e.target.id==='concProdQ'){ CONCPQ=e.target.value; $('concAllBody').innerHTML=concAllRows(); }
+  if(e.target.id==='concVenQ'){ CONCVQ=e.target.value; $('concVenBody').innerHTML=concVenRows(CONC.meses[CONCSEL]); } });
+$('view-conc').addEventListener('toggle',e=>{ if(e.target.id==='concAllDet') CONCPOPEN=e.target.open; },true);
+$('view-conc').addEventListener('click',e=>{
+  const pc=e.target.closest('th[data-ck]'); if(pc){ const k=pc.dataset.ck; CONCPS=CONCPS.k===k?{k,d:-CONCPS.d}:{k,d:k==='nom'?1:-1}; $('concAllHead').innerHTML=concProdHead(); $('concAllBody').innerHTML=concAllRows(); return; }
+  const vc=e.target.closest('th[data-cv]'); if(vc){ const k=vc.dataset.cv; CONCVS=CONCVS.k===k?{k,d:-CONCVS.d}:{k,d:(k==='id'||k==='e'||k==='s'||k==='i')?1:-1}; $('concVenHead').innerHTML=concVenHead(); $('concVenBody').innerHTML=concVenRows(CONC.meses[CONCSEL]); } });
 function renderConc(){ const v=$('view-conc'); if(!v) return; CONC=loadJSON(LS_CONC,CONC); CONC.meses=CONC.meses||{};
   const meses=Object.keys(CONC.meses).sort().reverse(); if(!CONCSEL||!CONC.meses[CONCSEL]) CONCSEL=meses[0]||'';
   v.innerHTML=concUploadHtml()+(CONCSEL?concMesHtml(CONC.meses[CONCSEL],meses):'<div class="card"><p class="hint" style="margin:0">Aún no has conciliado ningún mes. Sube tus reportes arriba y dale <b>Conciliar ▸</b>.</p></div>'); }
