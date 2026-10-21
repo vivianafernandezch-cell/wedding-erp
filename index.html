@@ -316,6 +316,7 @@ let PUBINDEX=loadJSON(LS_PUBINDEX,{}), RAWPUB=null, LINES=loadJSON(LS_LINES,[]),
 let MOVS=loadJSON(LS_MOVS,[]), APPLIED=loadJSON(LS_APPLIED,{}), LIVE={bodega:{},full:{},fba:{}};
 let RECETAS=loadJSON(LS_RECETA,{}), RECPUB="", RECVAR="", RECBUILD=[], RECCOMPSEL=null;
 let RECTS=loadJSON(LS_RECTS,{}), HIDDEN=new Set(loadJSON(LS_HIDDEN,[])), INVEDIT="";
+const LS_AMZREC="ml_amzrec_v3"; let AMZREC=loadJSON(LS_AMZREC,{});   // 🛒 recetas de Amazon: SKU de Amazon → piezas (mandan sobre la receta de ML)
 const LS_HIDERULES="ml_hiderules_v3"; let HIDER=loadJSON(LS_HIDERULES,{rules:[],skip:[],by:{}});   // 🚫 quitar productos para siempre por palabra
 let RECSPLIT=loadJSON(LS_RECSPLIT,{});   // por receta-key: true = en Full se SEPARA en sus piezas (set his&hers); default = 1 publicación
 let ZAPMAN=loadJSON(LS_ZAPMAN,{});   // {sku: true/false} override manual de negocio: true=zapatos, false=bodas/otros; sin llave = auto por nombre
@@ -656,7 +657,7 @@ function compute(){
       const t=pubTitle(s.pid)||s.nom||s.sku, e=fullPubBySku[s.sku]||(fullPubBySku[s.sku]={}); e[t]=(e[t]||0)+s.u; } }
   const demFba={};   // 🛒 Amazon: FBA (unidades de Amazon) y FBM (piezas de bodega) también cuentan como demanda
   for(const m of MOVS){ if(!/^Venta Amazon/.test(m.tipo||'')) continue; const q=+m.salida||0; if(!q) continue; const inWin=m.fecha&&m.fecha>=winStart&&m.fecha<=winEnd;
-    const pz=m.ubic==='fba'?recetaForEnvio(m.sku,PUBID[m.sku]||'').map(c=>[c.sku,q*(parseNum(c.qty)||1)]):[[m.sku,q]];
+    const pz=m.ubic==='fba'?amzReceta(m.sku).map(c=>[c.sku,q*(parseNum(c.qty)||1)]):[[m.sku,q]];
     for(const [k,v] of pz){ demTotAll[k]=(demTotAll[k]||0)+v; if(inWin) demTot[k]=(demTot[k]||0)+v; }
     if(inWin&&m.ubic==='fba') demFba[m.sku]=(demFba[m.sku]||0)+q; }
   const fullLabel={}; for(const sk in fullPubBySku){ let b='',bn=-1; for(const t in fullPubBySku[sk]){ if(fullPubBySku[sk][t]>bn){bn=fullPubBySku[sk][t]; b=t;} } fullLabel[sk]=b; }
@@ -1108,8 +1109,44 @@ function renderRecetas(){
     '<div style="margin-top:12px"><button class="btn" id="recSave">✓ Guardar receta</button> <button class="btn ghost sm" id="recClear">Limpiar</button></div></div>'+
     '<div class="card"><div class="tbar"><h3 class="vh">📋 Recetas guardadas ('+keys.length+')</h3><button class="btn ghost sm" id="recSuggest">✨ Sugerir packs por título</button></div>'+
     (keys.length?'<div class="tablewrap"><table><thead><tr><th>Publicación</th><th>Piezas</th><th>Tipo</th><th>Costo/venta</th><th></th></tr></thead><tbody>'+savedRows+'</tbody></table></div><p class="foot">Las piezas distintas se descuentan <b>automáticamente</b> con cada venta — ya no las metas como salida manual.</p>':'<p class="hint">Aún no defines recetas. Cada publicación vende 1 pieza por venta.</p>')+
-    '</div>';
+    '</div>'+amzRecHtml();
 }
+function amzRecTxt(comps){ return (comps||[]).map(c=>c.sku+' x'+num.format(parseNum(c.qty)||1)).join(' + '); }
+function amzRecParse(txt){ const out=[]; for(const part of (''+txt).split(/\s*[+,;]\s*/)){ const t=part.trim(); if(!t) continue; let m, sku, q;
+    if((m=t.match(/^(.+?)(?:\s+x\s*|\s*[×*]\s*)(\d+(?:\.\d+)?)$/i))){ sku=m[1].trim(); q=parseNum(m[2]); }
+    else if((m=t.match(/^(\d+(?:\.\d+)?)(?:\s*x\s+|\s*[×*]\s*)(.+)$/i))){ q=parseNum(m[1]); sku=m[2].trim(); }
+    else { sku=t; q=1; }
+    if(!sku||!(q>0)) return null; out.push({sku,qty:q}); }
+  return out.length?out:null; }
+function amzRecList(){ const M=new Map(), mapped=new Set(Object.values(AMZSKUMAP||{}));
+  const add=(raw,ped)=>{ raw=(''+(raw||'')).trim(); if(!raw) return; let x=M.get(raw); if(!x){ x={raw,ped:new Set()}; M.set(raw,x); } if(ped) x.ped.add(ped); };
+  for(const m of MOVS){ if(!/^Venta Amazon/.test(m.tipo||'')) continue; const t=(m.nota||'').match(/· ([^·]+)$/); add(t?t[1]:m.sku, m.ref||m.id); }
+  for(const sk in (AMZSALES.eco||{})) add(sk);
+  for(const sk in AMZ) if((AMZ[sk]||0)>0&&!mapped.has(sk)) add(sk);
+  for(const sk in AMZREC) add(sk);
+  return [...M.values()].map(x=>({raw:x.raw,ped:x.ped.size,o:amzRecOrigen(x.raw)})).sort((a,b)=>(b.ped-a.ped)||a.raw.localeCompare(b.raw,'es')); }
+function amzRecHtml(){ const L=amzRecList(); if(!L.length) return '';
+  const rev=L.filter(r=>r.o.t==='uno'||r.o.t==='split').length;
+  return '<div class="card" id="amzRecCard"><h3 class="vh">🛒 Recetas de Amazon ('+L.length+' SKUs)</h3>'+
+    '<p class="hint">Qué piezas salen de tu inventario por <b>cada venta de Amazon</b>. Si no le pones receta de Amazon, usa la de Mercado Libre de ese SKU. Si en Amazon lo vendes como <b>otro pack o kit</b>, escríbele aquí su receta y esa manda. Formato: <code>12N x6 + 12G x1</code>. Aplica a las ventas que subas <b>de aquí en adelante</b> (no cambia las ya registradas).'+(rev?' <b style="color:var(--bad)">Revisa sobre todo las '+rev+' marcadas ⚠️</b>: hoy descuentan 1 pieza.':'')+'</p>'+
+    '<div class="tablewrap" style="max-height:60vh"><table><thead><tr><th>SKU de Amazon</th><th>Producto</th><th>Pedidos</th><th>Hoy descuenta por venta</th><th>De dónde sale</th><th>Receta de Amazon</th></tr></thead><tbody>'+
+    L.map(r=>{ const es=(AMZSKUMAP&&AMZSKUMAP[r.raw])||r.raw, propia=AMZREC[r.raw], comps=amzReceta(r.raw), pz=comps.reduce((a,c)=>a+(parseNum(c.qty)||1),0);
+      return '<tr'+(r.o.t==='uno'||r.o.t==='split'?' style="background:var(--warn-bg,#fff6e0)"':'')+'><td><b>'+escapeHtml(r.raw)+'</b>'+(es!==r.raw?'<br><span style="color:var(--muted);font-size:11px">= '+escapeHtml(es)+'</span>':'')+'</td>'+
+        '<td class="prod" style="min-width:200px;max-width:280px;white-space:normal">'+(typeof fotoThumb==='function'?fotoThumb(es):'')+escapeHtml(nombreDe(es)||'')+'</td><td>'+num.format(r.ped)+'</td>'+
+        '<td>'+comps.map(c=>escapeHtml(c.sku)+' ×'+num.format(parseNum(c.qty)||1)).join(' + ')+(comps.length>1||pz>1?' <span style="color:var(--muted);font-size:11px">('+num.format(pz)+' pzs)</span>':'')+'</td>'+
+        '<td style="font-size:12px;max-width:220px;white-space:normal">'+escapeHtml(r.o.txt)+'</td>'+
+        '<td style="white-space:nowrap"><input type="text" class="amzRecIn" data-s="'+escapeHtml(r.raw)+'" value="'+escapeHtml(propia?amzRecTxt(propia):'')+'" placeholder="ej. '+escapeHtml(es)+' x2" style="width:170px"> <button class="btn sm amzRecSave" data-s="'+escapeHtml(r.raw)+'">Guardar</button>'+(propia?' <button class="btn ghost sm amzRecDel" data-s="'+escapeHtml(r.raw)+'" title="Quitar la receta de Amazon y volver a usar la de ML">Quitar</button>':'')+'</td></tr>'; }).join('')+
+    '</tbody></table></div></div>'; }
+function amzSkuConocido(s){ return !!(PRODUCTS.some(p=>p.key===s)||(s in BODEGA)||(s in FULL)||(s in COST)||INVNAME[s]||OVERRIDES[s]||MOVS.some(m=>m.sku===s)); }
+document.addEventListener('click',e=>{ const b=e.target.closest('.amzRecSave,.amzRecDel'); if(!b) return; const raw=b.dataset.s; const antes=amzRecTxt(amzReceta(raw));
+  if(b.classList.contains('amzRecDel')){ if(!confirm('¿Quitar la receta de Amazon de '+raw+'?\n\nVolverá a descontar: '+amzRecTxt(recetaForEnvio((AMZSKUMAP&&AMZSKUMAP[raw])||raw,PUBID[(AMZSKUMAP&&AMZSKUMAP[raw])||raw]||''))+'\n(solo ventas nuevas)')) return;
+    delete AMZREC[raw]; saveJSON(LS_AMZREC,AMZREC); recomputeLive(); refresh(); return; }
+  const inp=[...document.querySelectorAll('.amzRecIn')].find(x=>x.dataset.s===raw); const txt=inp?inp.value.trim():'';
+  if(!txt) return alert('Escribe la receta, ej. 12N x6 + 12G x1');
+  const comps=amzRecParse(txt); if(!comps) return alert('No entendí la receta. Escríbela así: 12N x6 + 12G x1');
+  const raros=comps.filter(c=>!amzSkuConocido(c.sku)).map(c=>c.sku);
+  if(!confirm('Receta de Amazon para '+raw+':\n\nCada venta descontará: '+amzRecTxt(comps)+'\n(antes: '+antes+')'+(raros.length?'\n\n⚠️ No encuentro estos SKUs en tu inventario: '+raros.join(', ')+'. Revisa que estén bien escritos.':'')+'\n\nAplica a las ventas de Amazon que subas de aquí en adelante. ¿Guardo?')) return;
+  AMZREC[raw]=comps; saveJSON(LS_AMZREC,AMZREC); recomputeLive(); refresh(); });
 /* ---------- PUBLICACIONES / CONCILIACIÓN ---------- */
 function pubColIdx(hdrU,hdrN){ const t=n=>hdrU.indexOf(n); const idx={item:t('ITEM_ID'),sku:t('SKU'),title:t('TITLE'),variations:t('VARIATIONS'),qty:t('QUANTITY'),price:t('PRICE')};
   if(idx.item<0) idx.item=hdrN.findIndex(c=>c.includes('numero de publicacion')||c.includes('n de publicacion'));
@@ -1675,6 +1712,15 @@ function recetaForEnvio(sku,pubRaw){
   if(parts.length>1) return parts.map(s=>({sku:s,qty:1}));
   return [{sku:sku,qty:1}];
 }
+/* 🛒 Amazon: primero su receta propia (por SKU de Amazon); si no tiene, la de ML de ese SKU; si no, 1 pieza */
+function amzRecPropia(sku){ if(!sku) return null; const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; let r=AMZREC[sku]||AMZREC[es];
+  if(!(r&&r.length)&&AMZSKUMAP) for(const raw in AMZSKUMAP){ if(AMZSKUMAP[raw]===sku&&AMZREC[raw]&&AMZREC[raw].length){ r=AMZREC[raw]; break; } }
+  return r&&r.length?r:null; }
+function amzReceta(sku){ const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; return amzRecPropia(sku)||recetaForEnvio(es,PUBID[es]||''); }
+function amzRecOrigen(sku){ const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; if(amzRecPropia(sku)) return {t:'amz',txt:'🛒 receta de Amazon'};
+  const k=kitOf(es,PUBID[es]||''); if(k.comps) return k.key===es?{t:'sku',txt:'🧩 receta de la pieza'}:{t:'ml',txt:'🟡 receta de ML: '+pubTitle(k.key.split('|')[0])};
+  if((''+es).split(/\s+y\s+|\s*\/\s*|\s*,\s*/).filter(Boolean).length>1) return {t:'split',txt:'⚠️ SKU compuesto: 1 de cada pieza'};
+  return {t:'uno',txt:'⚠️ sin receta: 1 pieza'}; }
 /* qué FILAS (SKUs distintos) van en FULL para 1 unidad. Default: 1 fila (la publicación, como ML).
    Si el kit está marcado "separar en Full" (set his&hers tipo Termo) → cada pieza distinta; SKU compuesto "A y B" → siempre separa. */
 function fullSkus(sku,pubRaw){
@@ -1729,7 +1775,7 @@ function applyAmzFile(){ if(!RAWAMZ||!AMZMAP.sku||!AMZMAP.qty){alert('Elige la c
 $('applyAmz').addEventListener('click',applyAmzFile);
 // ---- Ventas de Amazon → ganancia (v30) ----
 function amzGrid(text){ text=(text||'').replace(/^﻿/,''); const nl=text.indexOf('\n'); const head=nl>=0?text.slice(0,nl):text; if(head.indexOf('\t')>=0) return text.split(/\r?\n/).filter(l=>l.length).map(l=>l.split('\t')); return parseCSV(text); }
-function amzCosto(sku){ const e=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; const comps=recetaForEnvio(e,PUBID[e]||''); let c=0; for(const it of comps) c+=(ownCost(it.sku)||0)*(parseNum(it.qty)||1); return c; }
+function amzCosto(sku){ const comps=amzReceta(sku); let c=0; for(const it of comps) c+=(ownCost(it.sku)||0)*(parseNum(it.qty)||1); return c; }
 async function applyAmzSales(file){ const msg=$('amzSalesMsg');
   try{ const grid=/\.xlsx$/i.test(file.name)?await parseXLSX(await file.arrayBuffer()):amzGrid(await file.text()); const t=rowsToTable(grid); if(!t||!t.headers.length) throw new Error('vacío');
     const g=(r,n)=>{ if(r[n]!=null&&r[n]!=='') return r[n]; const k=Object.keys(r).find(x=>x.toLowerCase().trim()===n.toLowerCase()); return k?r[k]:''; };
@@ -1788,7 +1834,7 @@ async function registrarSalidaFBM(file){ const msg=$('amzFbmMsg');
       if(!sku) continue;
       seen.add(id); if(q<=0) continue;
       if(canal==='Amazon'){ const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; planFba.push({sku,es,q,oid,f:fecha}); pzFba+=q; continue; }
-      const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; const comps=recetaForEnvio(es,PUBID[es]||''); let pz=0; for(const c of comps) pz+=q*(parseNum(c.qty)||1);
+      const comps=amzReceta(sku); let pz=0; for(const c of comps) pz+=q*(parseNum(c.qty)||1);
       planFbm.push({sku,q,comps,oid,f:fecha}); pzFbm+=pz; }
     const nFix=amzFixFechas(fixF); if(nFix){ saveMovs(); recomputeLive(); }
     if(!planFba.length&&!planFbm.length){ AMZSALES.fbmSeen=[...seen]; saveJSON(LS_AMZSALES,AMZSALES); if(nFix) afterMov(); if(msg) msg.textContent='No hay ventas nuevas que registrar'+(nFix?(' · corregí la fecha de '+nFix+' ventas'):'')+(skip?(' · '+skip+' ya estaban'):'')+(pend?(' · '+pend+' pendientes de enviar'):'')+(canc?(' · '+canc+' canceladas'):'')+'.'; return; }
@@ -1851,7 +1897,7 @@ $('provExport').onclick=()=>dl('pedido-proveedor.csv',['SKU','Producto','Vendido
 $('invExport').onclick=()=>dl('inventario.csv',['SKU','Producto','Bodega','Full','FBA','EnCamino','Total','CostoU','Valor'],COMPUTED.filter(p=>p.inv).sort((a,b)=>b.valorInv-a.valorInv).map(p=>[p.key,p.nombre,p.bodega,p.full,p.fba,p.camino,p.total,round2(p.costo),round2(p.valorInv)]));
 
 /* ---------- respaldo / portabilidad ---------- */
-const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_AMZ,LS_AMZSALES,LS_AMZSKUMAP,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED,LS_DEVOL,LS_RECSPLIT,LS_ZAPMAN,LS_CONC,LS_HIDERULES,LS_MOVDEL];
+const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_AMZ,LS_AMZSALES,LS_AMZSKUMAP,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED,LS_DEVOL,LS_RECSPLIT,LS_ZAPMAN,LS_CONC,LS_HIDERULES,LS_MOVDEL,LS_AMZREC];
 function hacerBackup(){ const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
   const blob=new Blob([JSON.stringify({app:'wedding-shop-erp',v:3,fecha:hoy(),data})],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='wedding-erp-respaldo-'+hoy()+'.json'; a.click();
@@ -2230,7 +2276,7 @@ function registrarRetiroFull(prov,nota){
 function registrarEnvioFBA(prov,nota){
   const plan=[]; let totFba=0,totBod=0; const lineas=[];
   for(const it of LOTE){ const sku=it.sku, n=parseNum(it.cant)||0; if(n<=0) continue;
-    const comps=recetaForEnvio(sku,''), fs=fullSkus(sku,'');
+    const ra=amzRecPropia(sku), comps=ra||recetaForEnvio(sku,''), fs=ra?[sku]:fullSkus(sku,'');
     const esKit=comps.length>1 || comps[0].sku!==sku || (parseNum(comps[0].qty)||1)>1;
     let pz=0; for(const c of comps) pz+=n*(parseNum(c.qty)||1);
     plan.push({sku:sku,n:n,comps:comps,fs:fs}); totFba+=n*fs.length; totBod+=pz;
