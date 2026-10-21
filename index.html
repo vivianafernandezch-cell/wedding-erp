@@ -183,6 +183,8 @@
         <label class="field"><b>🗓️ Ventas recientes para reabasto (días, por defecto)</b><input type="number" id="reabWin" value="30" min="1" step="1"></label>
         <label class="field"><b>📤 Mantener en Full (días de venta)</b><input type="number" id="targetFull" value="30" min="1" step="1"></label>
         <label class="field" title="Días desde que mandas a Full hasta que ML lo tiene disponible. Con 0 el cálculo queda igual que antes."><b>🚚 Días que tarda en llegar a Full</b><input type="number" id="leadFull" value="0" min="0" step="1"></label>
+        <label class="field"><b>📦 Mantener en Amazon FBA (días de venta)</b><input type="number" id="targetFba" value="30" min="1" step="1"></label>
+        <label class="field" title="Días desde que mandas a Amazon hasta que lo tiene disponible para vender."><b>🚚 Días que tarda en llegar a Amazon</b><input type="number" id="leadFba" value="0" min="0" step="1"></label>
         <label class="field"><b>🛒 Pedir si el total baja de (días)</b><input type="number" id="targetTotal" value="45" min="1" step="1"></label>
         <label class="field"><b>Margen "bajo" si < (%)</b><input type="number" id="umbralMargen" value="15" min="0" step="1"></label>
         <label class="field"><b>📤 Reactivar agotados: mandar mínimo (uds)</b><input type="number" id="minSeed" value="2" min="0" step="1"></label>
@@ -256,6 +258,7 @@
     <p class="hint" id="reabWinNote" style="margin:0 0 6px"></p>
     <div class="tablewrap"><table><thead><tr id="fullHead"></tr></thead><tbody id="fullBody"></tbody></table></div>
     <p class="foot" id="fullFoot"></p>
+    <div id="fbaBox" style="margin:14px 0"></div>
     <h3 class="vh">🛒 Pedir a proveedor <span style="font-weight:400;color:var(--muted);font-size:12px">— te estás quedando bajo en total (bodega + Full)</span></h3>
     <p class="hint" id="reabWinNote2" style="margin:2px 0 6px"></p>
     <div class="tbar"><span></span><button class="btn ghost sm" id="provExport">⬇️ Lista de pedido (CSV)</button></div>
@@ -613,7 +616,7 @@ function addMov(o){ MOVS.push(Object.assign({id:movId(),ts:Date.now(),fecha:hoy(
 
 function compute(){
   const comPct=parseNum($('comPct').value), comFija=parseNum($('comFija').value), envioU=parseNum($('envio').value), empaqueU=parseNum($('empaqueU').value)||0;
-  const targetFull=Math.max(1,parseNum($('targetFull').value)), leadFull=Math.max(0,parseNum($('leadFull')?$('leadFull').value:0)||0), tgtFull=targetFull+leadFull;   // meta en Full + días que tarda en llegar
+  const targetFull=Math.max(1,parseNum($('targetFull').value)), leadFull=Math.max(0,parseNum($('leadFull')?$('leadFull').value:0)||0), tgtFull=targetFull+leadFull, tgtFba=Math.max(1,parseNum($('targetFba')?$('targetFba').value:30)||30)+Math.max(0,parseNum($('leadFba')?$('leadFba').value:0)||0);   // meta en Full/Amazon + días que tarda en llegar
   const targetTotal=Math.max(1,parseNum($('targetTotal').value));
   const umbralMargen=parseNum($('umbralMargen').value);
   const minSeed=$('minSeed')?Math.max(0,parseNum($('minSeed').value)):2;
@@ -651,6 +654,11 @@ function compute(){
     for(const it of receta(s.pid,s.sku)) demTot[it.sku]=(demTot[it.sku]||0)+(parseNum(it.qty)||0)*s.u;   // piezas → proveedor
     if(s.ubic==='full'){ demFull[s.sku]=(demFull[s.sku]||0)+s.u;                                          // SKU vendido → Full
       const t=pubTitle(s.pid)||s.nom||s.sku, e=fullPubBySku[s.sku]||(fullPubBySku[s.sku]={}); e[t]=(e[t]||0)+s.u; } }
+  const demFba={};   // 🛒 Amazon: FBA (unidades de Amazon) y FBM (piezas de bodega) también cuentan como demanda
+  for(const m of MOVS){ if(!/^Venta Amazon/.test(m.tipo||'')) continue; const q=+m.salida||0; if(!q) continue; const inWin=m.fecha&&m.fecha>=winStart&&m.fecha<=winEnd;
+    const pz=m.ubic==='fba'?recetaForEnvio(m.sku,PUBID[m.sku]||'').map(c=>[c.sku,q*(parseNum(c.qty)||1)]):[[m.sku,q]];
+    for(const [k,v] of pz){ demTotAll[k]=(demTotAll[k]||0)+v; if(inWin) demTot[k]=(demTot[k]||0)+v; }
+    if(inWin&&m.ubic==='fba') demFba[m.sku]=(demFba[m.sku]||0)+q; }
   const fullLabel={}; for(const sk in fullPubBySku){ let b='',bn=-1; for(const t in fullPubBySku[sk]){ if(fullPubBySku[sk][t]>bn){bn=fullPubBySku[sk][t]; b=t;} } fullLabel[sk]=b; }
   // costo de KIT por SKU (para Inventario): un SKU que es kit/bundle sin costo propio toma el costo de su receta
   const kitCostBySku={}; for(const L of CLINES){ if(L.tieneReceta && L.costoU>0){ if(kitCostBySku[L.sku]==null || L.costoU>kitCostBySku[L.sku]) kitCostBySku[L.sku]=L.costoU; } }
@@ -670,11 +678,15 @@ function compute(){
       if(agotado && bodega>0) need=Math.max(need,minSeed);
       if(need>0){ enviarFull=Math.min(need,Math.max(0,bodega)); faltaBodega=Math.max(0,need-enviarFull); needFull=true; }
     }
+    const velUdsFba=demFba[p.key]||0, velDiaFba=velUdsFba/winDays, covFba=velDiaFba>0?fba/velDiaFba:(fba>0?Infinity:0);
+    let enviarFba=0, faltaFba=0, needFba=false;
+    if(velUdsFba>0){ let need=0; if(covFba<tgtFba) need=Math.max(0,Math.ceil(velDiaFba*tgtFba)-fba); if(fba<=0&&bodega>0) need=Math.max(need,minSeed);
+      if(need>0){ enviarFba=Math.min(need,Math.max(0,bodega)); faltaFba=Math.max(0,need-enviarFba); needFba=true; } }
     let pedirProv=0, needProv=false;
     if(inv && velDia>0 && covTotal<targetTotal){ pedirProv=Math.max(0,Math.ceil(velDia*targetTotal)-total); needProv=pedirProv>0; }
     const setC=setCost(p.key), valorInv=Math.max(0,bodega)*ownCost(p.key)+Math.max(0,full+camino)*setC+Math.max(0,fba)*setC, agotadoFull=hasFull(p)&&full<=0&&velUdsFull>0;
     return {...p,precio,costo,full,camino,bodega,fba,inv,total,velUds,velDia,velUdsFull,velDiaFull,covFull,covTotal,velUdsAll,velDiaAll,covAll,
-            enviarFull,faltaBodega,needFull,pedirProv,needProv,valorInv,setCost:setC,esPack:setC>costo+0.001,agotadoFull,esKit,fullPub:fullLabel[p.key]||''};
+            enviarFull,faltaBodega,needFull,velUdsFba,velDiaFba,covFba,enviarFba,faltaFba,needFba,pedirProv,needProv,valorInv,setCost:setC,esPack:setC>costo+0.001,agotadoFull,esKit,fullPub:fullLabel[p.key]||''};
   });
 }
 const covTxt=c=>!isFinite(c)?'∞':(c>=999?'999+':Math.round(c));
@@ -893,7 +905,7 @@ function renderReabasto(){
   if($('reabRangeMsg')) $('reabRangeMsg').innerHTML=(REABINFO.custom?'📌 Rango fijo: ':'Por defecto = últimos '+REABINFO.win+' días de ventas: ')+'<b>'+fechaCorta(REABINFO.from)+'</b> al <b>'+fechaCorta(REABINFO.to)+'</b> ('+REABINFO.win+' días).'+(REABINFO.custom?' <a href="javascript:void(0)" id="reabClear" style="color:var(--accent-d)">volver a automático</a>':'');
   const winTxt='Ritmo medido con tus ventas del <b>'+fechaCorta(REABINFO.from)+'</b> al <b>'+fechaCorta(REABINFO.to)+'</b> ('+REABINFO.win+' días) — ajústalo aquí arriba 👆.';
   if($('reabWinNote')) $('reabWinNote').innerHTML='🏬 Cuenta <b>solo lo vendido por Mercado Envíos Full</b> (lo que mandas desde bodega no vacía tu Full; y las piezas sueltas de un kit no cuentan aquí). '+winTxt;
-  if($('reabWinNote2')) $('reabWinNote2').innerHTML='📦 Cuenta <b>todas</b> las piezas que repones (Full + bodega, e incluye las piezas que consumen tus kits). '+winTxt;
+  if($('reabWinNote2')) $('reabWinNote2').innerHTML='📦 Cuenta <b>todas</b> las piezas que repones (Full + bodega + <b>Amazon</b>, e incluye las piezas que consumen tus kits). '+winTxt;
   const fRows=sortRows(COMPUTED.filter(p=>(p.enviarFull>0||(p.needFull&&p.faltaBodega>0))&&!HIDDEN.has(p.key)&&_m(p)), FSORT.key, FSORT.dir);   // también los que se necesitan aunque no haya en bodega
   $('fullHead').innerHTML=thS('Publicación (Full)','nombre',FSORT)+thS('Vendido en Full','velUdsFull',FSORT)+thS('En Full','full',FSORT)+thS('Días Full','covFull',FSORT)+thS('En camino','camino',FSORT)+thS('En bodega','bodega',FSORT)+thS('📤 Enviar a Full','enviarFull',FSORT);
   $('fullBody').innerHTML=fRows.map(p=>{
@@ -908,6 +920,12 @@ function renderReabasto(){
   const sinB=fRows.filter(p=>p.enviarFull<=0).length, totFal=fRows.reduce((a,p)=>a+(p.faltaBodega||0),0);
   $('fullFoot').innerHTML=fRows.length?`Total a enviar de tu bodega a Full: <b>${num.format(totEnv)} piezas</b> en ${fRows.length-sinB} productos.`+(totFal?` · <span style="color:var(--bad)">Te faltan <b>${num.format(totFal)} piezas</b> que no tienes en bodega${sinB?' ('+sinB+' productos sin nada en bodega)':''}: pídelas o prodúcelas.</span>`:''):'';
 
+  { const aRows=COMPUTED.filter(p=>p.needFba&&!HIDDEN.has(p.key)&&_m(p)).sort((a,b)=>a.covFba-b.covFba), box=$('fbaBox');
+    if(box){ const totA=aRows.reduce((a,p)=>a+p.enviarFba,0), faltA=aRows.reduce((a,p)=>a+p.faltaFba,0);
+      box.innerHTML='<h3 class="vh">📦 Mandar a Amazon FBA <span style="font-weight:400;color:var(--muted);font-size:12px">— de tu bodega a Amazon (cuenta solo lo que Amazon vendió por FBA)</span></h3>'+
+        '<div class="tablewrap"><table><thead><tr><th>Producto</th><th>Vendido en Amazon</th><th>En Amazon</th><th>Días Amazon</th><th>En bodega</th><th>📤 Enviar a Amazon</th></tr></thead><tbody>'+
+        (aRows.length?aRows.map(p=>'<tr><td class="prod" style="max-width:340px">'+(typeof fotoThumb==='function'?fotoThumb(p.key):'')+escapeHtml(p.nombre||nombreDe(p.key))+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(p.key)+'</span></td><td>'+num.format(p.velUdsFba)+'</td><td>'+num.format(p.fba)+'</td><td>'+(p.fba<=0?'<span class="badge b-bad">agotado</span>':'<span class="badge b-warn">'+covTxt(p.covFba)+' d</span>')+'</td><td>'+num.format(p.bodega)+'</td><td class="send">'+(p.enviarFba>0?'+'+num.format(p.enviarFba):'')+(p.faltaFba>0?' <span class="badge b-bad">'+(p.enviarFba>0?'faltan ':'sin bodega · pide/produce ')+num.format(p.faltaFba)+'</span>':'')+'</td></tr>').join(''):'<tr><td colspan="6" class="empty">Nada urgente por mandar a Amazon. 🎉</td></tr>')+
+        '</tbody></table></div><p class="foot">'+(aRows.length?'Total a enviar a Amazon: <b>'+num.format(totA)+' piezas</b> en '+aRows.filter(p=>p.enviarFba>0).length+' productos'+(faltA?' · <span style="color:var(--bad)">te faltan <b>'+num.format(faltA)+'</b> que no tienes en bodega</span>':'')+'. Ojo: usa la misma bodega que "Mandar a Full"; si mandas a los dos, revisa que te alcance.':'')+'</p>'; } }
   const pRows=sortRows(COMPUTED.filter(p=>p.needProv&&!HIDDEN.has(p.key)&&_m(p)), PSORT.key, PSORT.dir);
   $('provHead').innerHTML=thS('Producto','nombre',PSORT)+thS('Vendido total','velUds',PSORT)+thS('En Full','full',PSORT)+thS('En bodega','bodega',PSORT)+thS('Total','total',PSORT)+thS('Días total','covTotal',PSORT)+thS('🛒 Pedir','pedirProv',PSORT)+thS('Costo/u','costo',PSORT)+'<th>Inversión</th>';
   $('provBody').innerHTML=pRows.map(p=>{
@@ -1615,7 +1633,7 @@ function applyMapping(){ if(!MAPPING.unidades){alert('Falta "Unidades vendidas".
   $('mtabs').classList.remove('hide'); $('dataPanel').classList.add('hide'); $('placeholder').classList.add('hide'); document.querySelectorAll('.view').forEach(v=>v.classList.add('hide'));
   saveCfg(); refresh(); showTab('resumen'); window.scrollTo(0,0); }
 
-function saveCfg(){ const c={}; ['comPct','comFija','envio','empaqueU','reabWin','targetFull','leadFull','targetTotal','umbralMargen','minSeed'].forEach(id=>c[id]=$(id).value); saveJSON(LS_CFG,c); }
+function saveCfg(){ const c={}; ['comPct','comFija','envio','empaqueU','reabWin','targetFull','leadFull','targetFba','leadFba','targetTotal','umbralMargen','minSeed'].forEach(id=>c[id]=$(id).value); saveJSON(LS_CFG,c); }
 function loadCfg(){ const c=loadJSON(LS_CFG,null); if(!c) return; Object.keys(c).forEach(id=>{ if($(id)) $(id).value=c[id]; }); }
 
 /* ---------- importadores ---------- */
@@ -1741,30 +1759,34 @@ function renderAmzSalesResults(){ const box=$('amzSalesResults'); if(!box) retur
 function renderAmzRentab(){ const box=$('rentabAmz'); if(!box) return; const h=amzGananciaHTML(); box.innerHTML = h ? '<h3 class="vh" style="margin-top:26px">📦 Rentabilidad de Amazon</h3>'+h : ''; }
 function amzTotals(){ const eco=AMZSALES.eco||{}; let u=0,ventas=0,net=0,costo=0; for(const sku in eco){ const e=eco[sku]; u+=e.u; ventas+=e.ventas; net+=e.net; costo+=amzCosto(sku)*(e.u||0); } return {u,ventas,net,costo,gan:net-costo}; }
 function renderAmzAll(){ renderAmzSalesResults(); renderAmzRentab(); try{ renderResumen(); }catch(e){} try{ renderDevol(); }catch(e){} }
+function amzFecha(v){ const m=(''+(v||'')).match(/(\d{4}-\d{2}-\d{2})/); return m?m[1]:''; }
+function amzFixFechas(fix){ let n=0; if(!fix||!fix.size) return 0; for(const m of MOVS){ if(!/^Venta Amazon/.test(m.tipo||'')) continue; const f=fix.get(m.ref); if(f&&m.fecha!==f){ m.fecha=f; m.u=Date.now(); n++; } } return n; }   // corrige la fecha de ventas ya registradas (no mueve inventario)
 async function registrarSalidaFBM(file){ const msg=$('amzFbmMsg');
   try{ const grid=/\.xlsx$/i.test(file.name)?await parseXLSX(await file.arrayBuffer()):amzGrid(await file.text()); const t=rowsToTable(grid); if(!t||!t.rows.length) throw new Error('vacío');
     const g=(r,n)=>{ if(r[n]!=null&&r[n]!=='') return r[n]; const k=Object.keys(r).find(x=>x.toLowerCase().trim()===n.toLowerCase()); return k?r[k]:''; };
     if(!t.rows.some(r=>(''+g(r,'sku'))!==''&&(''+g(r,'fulfillment-channel'))!=='')) throw new Error('no reconozco las columnas (¿es el reporte "Todos los pedidos"?)');
     if(!AMZSALES.fbmSeen) AMZSALES.fbmSeen=[];
-    const seen=new Set(AMZSALES.fbmSeen); let skip=0,canc=0,pend=0,pzFbm=0,pzFba=0; const planFbm=[], planFba=[];
+    const seen=new Set(AMZSALES.fbmSeen); let skip=0,canc=0,pend=0,pzFbm=0,pzFba=0; const planFbm=[], planFba=[], fixF=new Map();
     for(const r of t.rows){ const st=(''+g(r,'order-status'));
       if(/cancel/i.test(st)){ canc++; continue; }
       if(!/ship/i.test(st)){ pend++; continue; }
       const oid=(''+g(r,'amazon-order-id')).trim();
       const id=(''+(g(r,'order-item-id')||(oid+'|'+g(r,'sku')))).trim(); if(!id) continue;
-      if(seen.has(id)){ skip++; continue; }
+      const fecha=amzFecha(g(r,'purchase-date'));
+      if(seen.has(id)){ skip++; if(fecha&&oid) fixF.set(oid,fecha); continue; }
       const sku=(''+g(r,'sku')).trim(); if(!sku) continue;
       const q=parseNum(g(r,'quantity'))||0; seen.add(id); if(q<=0) continue;
-      if((''+g(r,'fulfillment-channel'))==='Amazon'){ const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; planFba.push({sku,es,q,oid}); pzFba+=q; continue; }
+      if((''+g(r,'fulfillment-channel'))==='Amazon'){ const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; planFba.push({sku,es,q,oid,f:fecha}); pzFba+=q; continue; }
       const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; const comps=recetaForEnvio(es,PUBID[es]||''); let pz=0; for(const c of comps) pz+=q*(parseNum(c.qty)||1);
-      planFbm.push({sku,q,comps,oid}); pzFbm+=pz; }
-    if(!planFba.length&&!planFbm.length){ AMZSALES.fbmSeen=[...seen]; saveJSON(LS_AMZSALES,AMZSALES); if(msg) msg.textContent='No hay ventas nuevas que registrar'+(skip?(' · '+skip+' ya estaban'):'')+(pend?(' · '+pend+' pendientes de enviar'):'')+(canc?(' · '+canc+' canceladas'):'')+'.'; return; }
+      planFbm.push({sku,q,comps,oid,f:fecha}); pzFbm+=pz; }
+    const nFix=amzFixFechas(fixF); if(nFix){ saveMovs(); recomputeLive(); }
+    if(!planFba.length&&!planFbm.length){ AMZSALES.fbmSeen=[...seen]; saveJSON(LS_AMZSALES,AMZSALES); if(nFix) afterMov(); if(msg) msg.textContent='No hay ventas nuevas que registrar'+(nFix?(' · corregí la fecha de '+nFix+' ventas'):'')+(skip?(' · '+skip+' ya estaban'):'')+(pend?(' · '+pend+' pendientes de enviar'):'')+(canc?(' · '+canc+' canceladas'):'')+'.'; return; }
     if(!confirm('Voy a REGISTRAR tus ventas de Amazon (cada una con su # de pedido):\n\n'+(planFba.length?('• FBA (Amazon envía): '+planFba.length+' ventas  ->  -'+num.format(pzFba)+' uds de tu inventario de Amazon\n'):'')+(planFbm.length?('• FBM (tú envías): '+planFbm.length+' ventas  ->  -'+num.format(pzFbm)+' piezas de tu bodega\n'):'')+'\n¿Confirmas?')) return;
-    for(const p of planFba){ addMov({tipo:'Venta Amazon (FBA)',sku:p.es,ubic:'fba',salida:p.q,prov:'Amazon',ref:p.oid,nota:'venta Amazon FBA'+(p.es!==p.sku?' · '+p.sku:'')}); }
-    for(const p of planFbm){ for(const c of p.comps){ const cq=parseNum(c.qty)||1; addMov({tipo:'Venta Amazon (FBM)',sku:c.sku,ubic:'bodega',salida:p.q*cq,prov:'Amazon',ref:p.oid,nota:'venta Amazon FBM · '+p.sku}); } }
+    for(const p of planFba){ addMov({tipo:'Venta Amazon (FBA)',sku:p.es,ubic:'fba',salida:p.q,prov:'Amazon',ref:p.oid,fecha:p.f||hoy(),nota:'venta Amazon FBA'+(p.es!==p.sku?' · '+p.sku:'')}); }
+    for(const p of planFbm){ for(const c of p.comps){ const cq=parseNum(c.qty)||1; addMov({tipo:'Venta Amazon (FBM)',sku:c.sku,ubic:'bodega',salida:p.q*cq,prov:'Amazon',ref:p.oid,fecha:p.f||hoy(),nota:'venta Amazon FBM · '+p.sku}); } }
     AMZSALES.fbmSeen=[...seen]; saveMovs(); recomputeLive(); saveJSON(LS_AMZSALES,AMZSALES); afterMov();
     const resumen=(planFba.length?('FBA −'+num.format(pzFba)+' uds'):'')+(planFba.length&&planFbm.length?' · ':'')+(planFbm.length?('FBM −'+num.format(pzFbm)+' pzs de bodega'):'');
-    if(msg) msg.textContent='✓ '+resumen+(skip?(' · '+skip+' ya estaban'):'')+(pend?(' · '+pend+' pendientes'):'')+'.';
+    if(msg) msg.textContent='✓ '+resumen+(nFix?(' · corregí la fecha de '+nFix+' ventas'):'')+(skip?(' · '+skip+' ya estaban'):'')+(pend?(' · '+pend+' pendientes'):'')+'.';
     alert('✅ Listo. Registré tus ventas de Amazon:\n'+(planFba.length?('• FBA: −'+num.format(pzFba)+' uds de tu inventario de Amazon\n'):'')+(planFbm.length?('• FBM: −'+num.format(pzFbm)+' piezas de tu bodega\n'):'')+'\nCada venta quedó con su # de pedido en Movimientos.'+(skip?('\n('+skip+' ya estaban, no se repitieron.)'):''));
   }catch(err){ if(msg) msg.textContent=''; alert('No pude leer el reporte: '+err.message); } }
 // Reaplica las equivalencias de SKU a los movimientos de Amazon YA registrados (FBA): mueve la salida del SKU de Amazon al SKU de tu ERP.
@@ -1845,7 +1867,7 @@ $('file').addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f)
 $('pasteToggle').onclick=()=>$('pasteBox').classList.toggle('hide');
 $('pasteLoad').onclick=()=>{ const t=$('pasteArea').value; if(t.trim()) onData(parseCSV(t)); };
 $('exampleBtn').onclick=loadExample; $('applyMap').onclick=applyMapping;
-['comPct','comFija','envio','empaqueU','reabWin','targetFull','leadFull','targetTotal','umbralMargen','minSeed'].forEach(id=>$(id).addEventListener('input',()=>{saveCfg(); if(COMPUTED.length)refresh();}));
+['comPct','comFija','envio','empaqueU','reabWin','targetFull','leadFull','targetFba','leadFba','targetTotal','umbralMargen','minSeed'].forEach(id=>$(id).addEventListener('input',()=>{saveCfg(); if(COMPUTED.length)refresh();}));
 $('concGoRestore').addEventListener('click',()=>{ const f=$('restoreFile'); f.scrollIntoView({block:'center'}); f.click(); });
 $('concOpenNow').addEventListener('click',()=>{ $('dataPanel').classList.add('hide'); $('mtabs').classList.remove('hide'); const ph=$('placeholder'); if(ph) ph.classList.add('hide'); renderConc(); showTab('conc'); window.scrollTo(0,0); });
 $('mtabs').addEventListener('click',e=>{ const t=e.target.closest('.mtab'); if(t) showTab(t.dataset.tab); });
