@@ -1760,28 +1760,39 @@ function renderAmzRentab(){ const box=$('rentabAmz'); if(!box) return; const h=a
 function amzTotals(){ const eco=AMZSALES.eco||{}; let u=0,ventas=0,net=0,costo=0; for(const sku in eco){ const e=eco[sku]; u+=e.u; ventas+=e.ventas; net+=e.net; costo+=amzCosto(sku)*(e.u||0); } return {u,ventas,net,costo,gan:net-costo}; }
 function renderAmzAll(){ renderAmzSalesResults(); renderAmzRentab(); try{ renderResumen(); }catch(e){} try{ renderDevol(); }catch(e){} }
 function amzFecha(v){ const m=(''+(v||'')).match(/(\d{4}-\d{2}-\d{2})/); return m?m[1]:''; }
-function amzFixFechas(fix){ let n=0; if(!fix||!fix.size) return 0; for(const m of MOVS){ if(!/^Venta Amazon/.test(m.tipo||'')) continue; const f=fix.get(m.ref); if(f&&m.fecha!==f){ m.fecha=f; m.u=Date.now(); n++; } } return n; }   // corrige la fecha de ventas ya registradas (no mueve inventario)
+function amzFixFechas(fix){ let n=0; if(!fix||!fix.size) return 0; const conRef=new Set();
+  for(const m of MOVS){ if(!/^Venta Amazon/.test(m.tipo||'')||!m.ref) continue; const x=fix.get(m.ref); if(!x) continue; conRef.add(m.ref); if(m.fecha!==x.f){ m.fecha=x.f; m.u=Date.now(); n++; } }
+  // ventas viejas sin # de pedido: se ligan por SKU + cantidad (una vez cada movimiento)
+  const libres=MOVS.filter(m=>/^Venta Amazon/.test(m.tipo||'')&&!m.ref);
+  for(const [oid,x] of [...fix.entries()].sort((a,b)=>(''+a[1].f).localeCompare(''+b[1].f))){ if(conRef.has(oid)||!x.sku) continue;
+    const es=(AMZSKUMAP&&AMZSKUMAP[x.sku])||x.sku; let grupo=[];
+    if(x.fba){ const m=libres.find(m=>!m.ref&&m.ubic==='fba'&&m.sku===es&&(+m.salida||0)===x.q); if(m) grupo=[m]; }
+    else { for(const c of recetaForEnvio(es,PUBID[es]||'')){ const want=x.q*(parseNum(c.qty)||1); const m=libres.find(m=>!m.ref&&!grupo.includes(m)&&m.ubic==='bodega'&&m.sku===c.sku&&(+m.salida||0)===want&&/· (.+)$/.test(m.nota||'')&&(m.nota||'').endsWith('· '+x.sku)); if(m) grupo.push(m); } }
+    for(const m of grupo){ m.ref=oid; if(m.fecha!==x.f){ m.fecha=x.f; n++; } m.u=Date.now(); } }
+  return n; }   // corrige la fecha de ventas ya registradas (no mueve inventario)   // corrige la fecha de ventas ya registradas (no mueve inventario)
 async function registrarSalidaFBM(file){ const msg=$('amzFbmMsg');
   try{ const grid=/\.xlsx$/i.test(file.name)?await parseXLSX(await file.arrayBuffer()):amzGrid(await file.text()); const t=rowsToTable(grid); if(!t||!t.rows.length) throw new Error('vacío');
     const g=(r,n)=>{ if(r[n]!=null&&r[n]!=='') return r[n]; const k=Object.keys(r).find(x=>x.toLowerCase().trim()===n.toLowerCase()); return k?r[k]:''; };
-    if(!t.rows.some(r=>(''+g(r,'sku'))!==''&&(''+g(r,'fulfillment-channel'))!=='')) throw new Error('no reconozco las columnas (¿es el reporte "Todos los pedidos"?)');
+    const repFbm=!t.rows.some(r=>(''+g(r,'fulfillment-channel'))!=='')&&t.rows.some(r=>(''+g(r,'sku'))!==''&&(''+g(r,'order-id'))!==''&&(''+g(r,'quantity-purchased'))!=='');   // reporte "Pedidos de FBM"
+    if(!repFbm&&!t.rows.some(r=>(''+g(r,'sku'))!==''&&(''+g(r,'fulfillment-channel'))!=='')) throw new Error('no reconozco las columnas (¿es el reporte "Todos los pedidos" o "Pedidos de FBM"?)');
     if(!AMZSALES.fbmSeen) AMZSALES.fbmSeen=[];
     const seen=new Set(AMZSALES.fbmSeen); let skip=0,canc=0,pend=0,pzFbm=0,pzFba=0; const planFbm=[], planFba=[], fixF=new Map();
-    for(const r of t.rows){ const st=(''+g(r,'order-status'));
+    for(const r of t.rows){ const st=repFbm?'Shipped':(''+g(r,'order-status'));
       if(/cancel/i.test(st)){ canc++; continue; }
       if(!/ship/i.test(st)){ pend++; continue; }
-      const oid=(''+g(r,'amazon-order-id')).trim();
+      const oid=(''+(g(r,'amazon-order-id')||g(r,'order-id'))).trim();
       const id=(''+(g(r,'order-item-id')||(oid+'|'+g(r,'sku')))).trim(); if(!id) continue;
       const fecha=amzFecha(g(r,'purchase-date'));
-      if(seen.has(id)){ skip++; if(fecha&&oid) fixF.set(oid,fecha); continue; }
-      const sku=(''+g(r,'sku')).trim(); if(!sku) continue;
-      const q=parseNum(g(r,'quantity'))||0; seen.add(id); if(q<=0) continue;
-      if((''+g(r,'fulfillment-channel'))==='Amazon'){ const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; planFba.push({sku,es,q,oid,f:fecha}); pzFba+=q; continue; }
+      const sku=(''+g(r,'sku')).trim(), q=parseNum(g(r,'quantity')||g(r,'quantity-purchased'))||0, canal=repFbm?'Merchant':(''+g(r,'fulfillment-channel'));
+      if(seen.has(id)){ skip++; if(fecha&&oid) fixF.set(oid,{f:fecha,sku,q,fba:canal==='Amazon'}); continue; }
+      if(!sku) continue;
+      seen.add(id); if(q<=0) continue;
+      if(canal==='Amazon'){ const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; planFba.push({sku,es,q,oid,f:fecha}); pzFba+=q; continue; }
       const es=(AMZSKUMAP&&AMZSKUMAP[sku])||sku; const comps=recetaForEnvio(es,PUBID[es]||''); let pz=0; for(const c of comps) pz+=q*(parseNum(c.qty)||1);
       planFbm.push({sku,q,comps,oid,f:fecha}); pzFbm+=pz; }
     const nFix=amzFixFechas(fixF); if(nFix){ saveMovs(); recomputeLive(); }
     if(!planFba.length&&!planFbm.length){ AMZSALES.fbmSeen=[...seen]; saveJSON(LS_AMZSALES,AMZSALES); if(nFix) afterMov(); if(msg) msg.textContent='No hay ventas nuevas que registrar'+(nFix?(' · corregí la fecha de '+nFix+' ventas'):'')+(skip?(' · '+skip+' ya estaban'):'')+(pend?(' · '+pend+' pendientes de enviar'):'')+(canc?(' · '+canc+' canceladas'):'')+'.'; return; }
-    if(!confirm('Voy a REGISTRAR tus ventas de Amazon (cada una con su # de pedido):\n\n'+(planFba.length?('• FBA (Amazon envía): '+planFba.length+' ventas  ->  -'+num.format(pzFba)+' uds de tu inventario de Amazon\n'):'')+(planFbm.length?('• FBM (tú envías): '+planFbm.length+' ventas  ->  -'+num.format(pzFbm)+' piezas de tu bodega\n'):'')+'\n¿Confirmas?')) return;
+    if(!confirm('Voy a REGISTRAR tus ventas de Amazon (cada una con su # de pedido):\n\n'+(repFbm?'ℹ️ Este es el reporte de "Pedidos de FBM": solo trae lo que tú envías y NO marca cancelaciones; si cancelaste alguno, bórralo después en Movimientos. Para las ventas FBA sube "Todos los pedidos".\n\n':'')+(planFba.length?('• FBA (Amazon envía): '+planFba.length+' ventas  ->  -'+num.format(pzFba)+' uds de tu inventario de Amazon\n'):'')+(planFbm.length?('• FBM (tú envías): '+planFbm.length+' ventas  ->  -'+num.format(pzFbm)+' piezas de tu bodega\n'):'')+'\n¿Confirmas?')) return;
     for(const p of planFba){ addMov({tipo:'Venta Amazon (FBA)',sku:p.es,ubic:'fba',salida:p.q,prov:'Amazon',ref:p.oid,fecha:p.f||hoy(),nota:'venta Amazon FBA'+(p.es!==p.sku?' · '+p.sku:'')}); }
     for(const p of planFbm){ for(const c of p.comps){ const cq=parseNum(c.qty)||1; addMov({tipo:'Venta Amazon (FBM)',sku:c.sku,ubic:'bodega',salida:p.q*cq,prov:'Amazon',ref:p.oid,fecha:p.f||hoy(),nota:'venta Amazon FBM · '+p.sku}); } }
     AMZSALES.fbmSeen=[...seen]; saveMovs(); recomputeLive(); saveJSON(LS_AMZSALES,AMZSALES); afterMov();
