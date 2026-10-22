@@ -330,6 +330,7 @@
     </div><div class="solo-amz"><h2 style="margin:24px 0 4px">📦 Amazon</h2>
     <div class="card"><div id="slotAmzInv"></div><div id="cuadreAmzBox" style="margin-top:12px"></div></div>
     <div id="gananciaBox"></div>
+    <div class="card" id="envFbaCard"><h3 class="vh">📥 Envío a Amazon FBA (archivo)</h3><p class="hint">Cada vez que mandes mercancía a Amazon, sube el archivo del envío que te da Seller Central (<b>FBA….tsv</b>, el de "SKU del vendedor … Enviado"). Le da <b>entrada en Amazon FBA</b> y <b>salida de tu bodega</b> con las piezas reales según la <b>receta de Amazon</b> de cada publicación (packs y kits se multiplican). Antes de registrar te enseño todo para que lo revises. Si subes el mismo envío dos veces, lo reemplaza (no duplica).</p><input type="file" id="envFbaFile" accept=".tsv,.txt,.csv"><div id="envFbaMsg" class="hint" style="margin-top:4px"></div><div id="envFbaBox"></div><div id="envFbaHist"></div></div>
     <div class="card"><h3 class="vh">📤 Ventas de Amazon → dar salida (FBA + FBM)</h3><p class="hint">Sube el reporte <b>"Todos los pedidos"</b>. El ERP da salida a <b>TODAS</b> tus ventas: las de <b>FBA</b> (Amazon envía) bajan de tu <b>inventario de Amazon</b>, y las de <b>FBM</b> (tú envías) bajan de tu <b>bodega</b>. Cada venta queda con su <b># de pedido</b> en Movimientos. No cuenta dos veces lo ya registrado. Después usa el <b>Cuadre de Amazon</b> para ver si Amazon perdió piezas.</p><input type="file" id="amzFbmFile" accept=".txt,.csv,.xlsx"><div id="amzFbmMsg" class="hint" style="margin-top:4px"></div><div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line,#ece6e2)"><button class="btn ghost sm" id="btnReaplicarFBA">🔁 Corregir inventario con mis equivalencias de SKU</button><p class="hint" style="margin:5px 0 0">¿Tu producto se vende en Amazon con un SKU distinto al de tu ERP (ej. <b>DSLOT</b> = <b>13LOT</b>)? Primero escribe la equivalencia en la cajita ⚠️ de «Ganancia de Amazon»; luego dale aquí y las ventas de FBA ya registradas se mueven al SKU correcto para que baje tu inventario real.</p></div></div>
     </div><h2 style="margin:24px 0 4px">💾 Respaldo</h2>
     <div id="slotRespaldo"></div>
@@ -2075,13 +2076,14 @@ function inicioPendientes(D){ const P=[], add=(c,lvl,t,tab,canal)=>P.push({c,lvl
   if(D.nProv) add('todo','warn','🛒 '+D.nProv+' '+(D.nProv===1?'producto':'productos')+' por pedir a tu proveedor','reabasto',CANAL==='amz'?'amz':'ml');
   return P.filter(x=>CANAL==='todo'||x.c===CANAL||x.c==='todo'); }
 /* ---------- 📥 ZONA ÚNICA: reconoce cada archivo y lo manda a su lugar ---------- */
-const DROPT={file:'🛒 Ventas de Mercado Libre',pubFile:'📋 Publicaciones de ML',fullFile:'⚡ Reporte de Full',e2fFile:'📤 Envío a Full',concFiles:'🏦 Mercado Pago / Facturación (conciliación ML)',concAmzFiles:'💵 Liquidación de Amazon',amzFbmFile:'📦 Pedidos de Amazon (dar salida)',amzSalesFile:'📊 Ganancia de Amazon',amzFile:'📦 Inventario de Amazon FBA',banco:'🏦 Estado de cuenta del banco'};
+const DROPT={file:'🛒 Ventas de Mercado Libre',pubFile:'📋 Publicaciones de ML',fullFile:'⚡ Reporte de Full',e2fFile:'📤 Envío a Full',concFiles:'🏦 Mercado Pago / Facturación (conciliación ML)',concAmzFiles:'💵 Liquidación de Amazon',amzFbmFile:'📦 Pedidos de Amazon (dar salida)',amzSalesFile:'📊 Ganancia de Amazon',amzFile:'📦 Inventario de Amazon FBA',envFbaFile:'📥 Envío a Amazon FBA',banco:'🏦 Estado de cuenta del banco'};
 async function dropDetect(f){ if(/\.pdf$/i.test(f.name)) return 'banco'; if(/\.json$/i.test(f.name)) return '';
   let rows=null, txt=''; if(/\.xlsx$/i.test(f.name)){ rows=await parseXLSX(await f.arrayBuffer()); txt=rows.slice(0,15).map(r=>(r||[]).join('|')).join('\n'); } else txt=(await f.text()).slice(0,6000);
   const t=txt.toLowerCase();
   if(t.includes('settlement-id')) return 'concAmzFiles';
   if(t.includes('amazon-order-id')||(t.includes('order-id')&&t.includes('quantity-purchased'))) return 'amzFbmFile';
   if(t.includes('unidades netas vendidas')||t.includes('ingresos netos en total')) return 'amzSalesFile';
+  if(t.includes('id del envío')||t.includes('id del envio')||t.includes('shipment id')) return 'envFbaFile';
   if(t.includes('afn-')||t.includes('fnsku')) return 'amzFile';
   if(rows){ const c=concDetect(rows); if(c==='ventas') return 'file'; if(c) return 'concFiles'; }
   if((t.includes('item_id')&&t.includes('sku'))||t.includes('numero de publicacion')||t.includes('número de publicación')) return 'pubFile';
@@ -2095,7 +2097,7 @@ async function dropFiles(files){ const js=files.filter(f=>/\.json$/i.test(f.name
   const G={}, raros=[], lines=[];
   for(const f of files){ let d=''; try{ d=await dropDetect(f); }catch(e){ console.error(e); } if(!d){ raros.push(f.name); continue; } (G[d]=G[d]||[]).push(f); }
   if(G.banco){ (G[CANAL==='amz'?'concAmzFiles':'concFiles']=G[CANAL==='amz'?'concAmzFiles':'concFiles']||[]).push(...G.banco); }
-  const orden=['file','pubFile','fullFile','e2fFile','amzFile','amzSalesFile','amzFbmFile','concFiles','concAmzFiles'];
+  const orden=['file','pubFile','fullFile','e2fFile','amzFile','envFbaFile','amzSalesFile','amzFbmFile','concFiles','concAmzFiles'];
   for(const id of orden){ const fs=G[id]; if(!fs) continue; const banco=G.banco&&fs.some(f=>G.banco.includes(f));
     lines.push('✅ '+fs.map(f=>'<b>'+escapeHtml(f.name)+'</b>').join(', ')+' → '+(fs.every(f=>G.banco&&G.banco.includes(f))?DROPT.banco:DROPT[id]+(banco?' + '+DROPT.banco:''))+
       (id==='concFiles'?' <button class="btn ghost sm goTab" data-tab="conc" data-canal="ml">Ir a Conciliación y darle Conciliar ▸</button>':id==='concAmzFiles'?' <button class="btn ghost sm goTab" data-tab="conc" data-canal="amz">Ver en Conciliación ▸</button>':''));
@@ -2478,7 +2480,7 @@ function renderMovimientos(){
       '<p class="hint">El <b>costo</b> de las entradas se promedia (ponderado) para tu costo de producto. El buscador encuentra por nombre o SKU (sin acentos).</p></div>'+
     '<div class="card"><div class="tbar"><h3 class="vh">📒 Historial de movimientos ('+MOVS.length+')</h3><div class="row" style="gap:8px"><input type="text" id="movSearch" placeholder="🔍 Buscar fecha, tipo, SKU, proveedor, comentario…" style="width:300px" value="'+escapeHtml(MOVSEARCH)+'"><button class="btn ghost sm" id="movExport">⬇️ CSV</button></div></div><div id="movTotals"></div><div class="tablewrap" style="max-height:55vh"><table><thead><tr id="movHead"></tr></thead><tbody id="movBody"></tbody></table></div></div>';
   if($('cuadreFullBox')) $('cuadreFullBox').innerHTML=cuadre;
-  if($('cuadreAmzBox')) $('cuadreAmzBox').innerHTML=cuadreAmz;
+  if($('cuadreAmzBox')) $('cuadreAmzBox').innerHTML=cuadreAmz; try{ envFbaHistRender(); }catch(e){}
   if($('envFullBox')) $('envFullBox').innerHTML=envfull;
   if($('gananciaBox')) $('gananciaBox').innerHTML=ventasAmz;
   renderHistorial(); renderLote(); syncMovMode(); renderAmzSalesResults();
@@ -2588,6 +2590,80 @@ function registrarRetiroFull(prov,nota){
   alert('✅ Retiro de Full registrado.\n• Full −'+num.format(totFull)+'\n• Bodega +'+num.format(totBod)+' piezas de vuelta en casa.');
 }
 // Envío a Amazon FBA: espejo del Retiro de Full — SACA las piezas de tu BODEGA y sube las unidades a Amazon FBA (kits multiplican las piezas que salen). NO toca el costo (las piezas ya estaban costeadas).
+/* 📥 Envío a Amazon FBA por ARCHIVO (el .tsv del envío de Seller Central): entrada a FBA (unidades de la publicación) y salida de bodega (piezas según la receta de Amazon). ref = ID del envío → re-subirlo reemplaza. */
+let ENVFBA=null;
+function envFbaParse(text){ const L=(''+text).replace(/^﻿/,'').split(/\r?\n/); const sep=L.some(l=>l.includes('\t'))?'\t':',';
+  const cells=l=>l.split(sep).map(c=>c.trim().replace(/^"(.*)"$/,'$1').trim());
+  let id='', nombre='', hi=-1;
+  for(let i=0;i<L.length;i++){ const c=cells(L[i]), k=norm(c[0]||'');
+    if(hi<0&&(k.startsWith('id del envio')||k==='shipment id')) id=c[1]||'';
+    else if(hi<0&&(k==='nombre'||k==='name')) nombre=c[1]||'';
+    else if(c.some(x=>/^(sku del vendedor|merchant sku)/.test(norm(x)))){ hi=i; break; } }
+  if(hi<0) return null;
+  const H=cells(L[hi]).map(norm), col=re=>H.findIndex(h=>re.test(h));
+  const cs=col(/^(sku del vendedor|merchant sku)/), ct=col(/^(titulo|title)/);
+  let cq=col(/^(enviado|unidades enviadas|shipped|cantidad enviada|units)/); if(cq<0) cq=H.length-1;
+  const rows=[]; for(let i=hi+1;i<L.length;i++){ const c=cells(L[i]); const raw=(c[cs]||'').trim(), n=parseNum(c[cq]); if(!raw||!(n>0)) continue; rows.push({raw,tit:c[ct]||'',n}); }
+  if(!id){ const m=nombre.match(/FBA\w+/); if(m) id=m[0]; }
+  return {id,nombre,rows}; }
+function envFbaEs(r){ const v=(r.map!=null?r.map:((AMZSKUMAP&&AMZSKUMAP[r.raw])||'')).trim(); return v||r.raw; }
+function envFbaRec(raw,es){ const a=AMZREC[raw]||AMZREC[es]; return (a&&a.length)?a:recetaForEnvio(es,PUBID[es]||''); }
+function envFbaBod(s){ return parseNum(LIVE_ON()?((LIVE.bodega||{})[s]||0):(BODEGA[s]||0)); }
+function envFbaPlan(){ const out=[], pz={};
+  for(const r of ENVFBA.rows){ const es=envFbaEs(r), comps=envFbaRec(r.raw,es), propia=!!(AMZREC[r.raw]||AMZREC[es]);
+    const desconocidas=comps.filter(c=>!amzSkuConocido(c.sku)).map(c=>c.sku);
+    const ok=propia ? !desconocidas.length : (amzSkuConocido(es)&&!desconocidas.length);
+    for(const c of comps) pz[c.sku]=(pz[c.sku]||0)+r.n*(parseNum(c.qty)||1);
+    out.push({r,es,comps,ok,propia,desconocidas}); }
+  return {filas:out,pz}; }
+function envFbaRender(){ const box=$('envFbaBox'); if(!box) return; if(!ENVFBA){ box.innerHTML=''; envFbaHistRender(); return; }
+  const P=envFbaPlan(), malos=P.filas.filter(f=>!f.ok).length, ya=MOVS.some(m=>m.tipo==='Envío a Amazon FBA'&&m.ref&&m.ref===ENVFBA.id);
+  const neg=Object.keys(P.pz).filter(s=>amzSkuConocido(s)&&envFbaBod(s)-P.pz[s]<0);
+  const totU=ENVFBA.rows.reduce((a,r)=>a+r.n,0), totP=Object.values(P.pz).reduce((a,b)=>a+b,0);
+  const dl='<datalist id="envFbaSkus">'+[...new Set(PRODUCTS.map(p=>p.key))].sort().map(k=>'<option value="'+escapeHtml(k)+'">'+escapeHtml((nombreDe(k)||'').slice(0,60))+'</option>').join('')+'</datalist>';
+  box.innerHTML=dl+'<div style="margin-top:10px;padding:10px 12px;background:var(--warn-bg,#fdf3e0);border-radius:8px;line-height:1.5"><b>Envío '+escapeHtml(ENVFBA.id||'(sin ID)')+'</b>'+(ENVFBA.nombre?' · '+escapeHtml(ENVFBA.nombre):'')+'<br>'+ENVFBA.rows.length+' publicaciones · <b>'+num.format(totU)+'</b> unidades a Amazon → <b>'+num.format(totP)+'</b> piezas salen de tu bodega'+
+    (ya?'<br>🔁 Este envío <b>ya estaba registrado</b>: si confirmas, reemplazo el registro anterior (no se duplica).':'')+'</div>'+
+    '<div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>Publicación en Amazon</th><th>Mandaste</th><th>Es en tu ERP</th><th>Sale de tu bodega</th><th></th></tr></thead><tbody>'+
+    P.filas.map((f,i)=>{ const det=!f.ok?'—':f.comps.map(c=>{ const q=f.r.n*(parseNum(c.qty)||1), b=envFbaBod(c.sku); return escapeHtml(c.sku)+' <b>−'+num.format(q)+'</b> <span style="color:var(--muted);font-size:11px">('+num.format(b)+' → '+(b-P.pz[c.sku]<0?'<span class="neg">':'')+num.format(b-P.pz[c.sku])+(b-P.pz[c.sku]<0?'</span>':'')+')</span>'; }).join('<br>');
+      return '<tr'+(f.ok?'':' style="background:var(--bad-bg,#fdeaea)"')+'><td class="prod" style="max-width:300px;white-space:normal"><b>'+escapeHtml(f.r.raw)+'</b><br><span style="color:var(--muted);font-size:11px">'+escapeHtml(f.r.tit.slice(0,90))+'</span></td><td>'+num.format(f.r.n)+'</td>'+
+        '<td><input class="envFbaMap" data-i="'+i+'" list="envFbaSkus" value="'+escapeHtml(f.es===f.r.raw?'':f.es)+'" placeholder="SKU del ERP" style="width:120px"><div style="font-size:11px;color:var(--muted);max-width:170px;white-space:normal">'+escapeHtml(f.es!==f.r.raw?(nombreDe(f.es)||'').slice(0,50):'')+'</div></td>'+
+        '<td style="white-space:nowrap">'+det+'<div style="font-size:11px;color:var(--muted)">'+(f.propia?'🛒 receta de Amazon':'receta de '+escapeHtml(f.es))+'</div></td>'+
+        '<td>'+(f.ok?'✅':'⚠️ '+(f.desconocidas.length?'No conozco '+escapeHtml(f.desconocidas.join(', ')):'')+'<br><span style="font-size:11px">Escribe a qué SKU de tu ERP corresponde</span>')+'</td></tr>'; }).join('')+
+    '</tbody></table></div>'+
+    (neg.length?'<p class="hint" style="color:var(--bad,#b3261e)">⚠️ Tu bodega quedaría en negativo en: <b>'+neg.map(s=>escapeHtml(s)+' ('+num.format(envFbaBod(s)-P.pz[s])+')').join(', ')+'</b>. Revisa la liga o la receta antes de registrar (o ajusta tu conteo).</p>':'')+
+    '<div class="row" style="gap:10px;align-items:center;margin-top:8px"><label class="field" style="min-width:150px"><b>Fecha del envío</b><input type="date" id="envFbaFecha" value="'+escapeHtml(ENVFBA.fecha||hoy())+'"></label>'+
+    '<button class="btn sm" id="envFbaOk"'+(malos?' disabled title="Liga primero las filas en rojo"':'')+'>Registrar envío ▸</button> <button class="btn ghost sm" id="envFbaNo">Cancelar</button>'+(malos?' <span class="hint">Faltan '+malos+' por ligar.</span>':'')+'</div>'+
+    '<p class="hint">La liga se guarda para siempre (ventas y reportes de Amazon de ese SKU también la usan). Si un pack necesita otra receta solo para Amazon, cámbiala en <b>🛒 Recetas de Amazon</b> y vuelve a subir el archivo.</p>';
+  envFbaHistRender(); }
+function envFbaHistRender(){ const h=$('envFbaHist'); if(!h) return; const M={};
+  for(const m of MOVS){ if(m.tipo!=='Envío a Amazon FBA'||!m.ref) continue; const e=M[m.ref]=M[m.ref]||{id:m.ref,f:m.fecha,fba:0,bod:0}; if(m.ubic==='fba') e.fba+=parseNum(m.entrada)||0; else e.bod+=parseNum(m.salida)||0; }
+  const L=Object.values(M).sort((a,b)=>(b.f||'').localeCompare(a.f||'')).slice(0,5);
+  h.innerHTML=L.length?'<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--line,#eee)"><div class="group-title" style="font-size:12px">Envíos registrados con archivo</div>'+L.map(e=>'<div style="font-size:13px;margin:3px 0">'+escapeHtml(e.f||'')+' · <b>'+escapeHtml(e.id)+'</b> · Amazon +'+num.format(e.fba)+' · bodega −'+num.format(e.bod)+' <button class="btn ghost sm envFbaUndo" data-id="'+escapeHtml(e.id)+'">↩️ Deshacer</button></div>').join('')+'</div>':''; }
+async function envFbaLoad(f){ const msg=$('envFbaMsg'); try{ const d=envFbaParse(await f.text());
+    if(!d||!d.rows.length){ ENVFBA=null; msg.textContent='No encontré productos en ese archivo. Debe ser el del envío (columnas "SKU del vendedor" y "Enviado").'; envFbaRender(); return; }
+    ENVFBA=d; msg.textContent=''; envFbaRender(); }catch(e){ console.error(e); msg.textContent='No pude leer el archivo: '+e.message; } }
+function envFbaAplicar(){ if(!ENVFBA) return; const P=envFbaPlan(); if(P.filas.some(f=>!f.ok)) return alert('Liga primero las filas en rojo con su SKU del ERP.');
+  const id=ENVFBA.id||('archivo-'+Date.now()), fecha=($('envFbaFecha')&&$('envFbaFecha').value)||hoy();
+  const neg=Object.keys(P.pz).filter(s=>envFbaBod(s)-P.pz[s]<0);
+  const lineas=P.filas.map(f=>'• '+f.r.raw+(f.es!==f.r.raw?' ('+f.es+')':'')+': Amazon +'+num.format(f.r.n)+'  →  bodega '+f.comps.map(c=>c.sku+' −'+num.format(f.r.n*(parseNum(c.qty)||1))).join(', '));
+  if(!confirm('ENVÍO '+id+' a Amazon FBA ('+fecha+'):\n\n'+lineas.join('\n')+(neg.length?'\n\n⚠️ Quedan en negativo en bodega: '+neg.join(', '):'')+'\n\n¿Lo registro?')) return;
+  let mapN=0; for(const f of P.filas){ if(f.es!==f.r.raw&&AMZSKUMAP[f.r.raw]!==f.es){ AMZSKUMAP[f.r.raw]=f.es; mapN++; } }
+  if(mapN){ saveJSON(LS_AMZSKUMAP,AMZSKUMAP); reaplicarMapaFBA(true); }
+  let quit=0; for(let i=MOVS.length-1;i>=0;i--){ if(MOVS[i].tipo==='Envío a Amazon FBA'&&MOVS[i].ref===id){ MOVS.splice(i,1); quit++; } }
+  let tF=0,tB=0; const nota='envío FBA '+id;
+  for(const f of P.filas){ addMov({tipo:'Envío a Amazon FBA',sku:f.es,ubic:'fba',entrada:f.r.n,prov:'Amazon',fecha,ref:id,nota:nota+(f.es!==f.r.raw?' · '+f.r.raw:'')}); tF+=f.r.n;
+    for(const c of f.comps){ const q=f.r.n*(parseNum(c.qty)||1); addMov({tipo:'Envío a Amazon FBA',sku:c.sku,ubic:'bodega',salida:q,prov:'Amazon',fecha,ref:id,nota:nota+((c.sku!==f.es||(parseNum(c.qty)||1)>1)?(' · '+f.r.raw+' ×'+(parseNum(c.qty)||1)):'')}); tB+=q; } }
+  saveMovs(); recomputeLive(); ENVFBA=null; afterMov(); envFbaRender();
+  alert('✅ Envío '+id+' registrado.\n• Amazon FBA +'+num.format(tF)+' unidades\n• Bodega −'+num.format(tB)+' piezas'+(mapN?'\n• Guardé '+mapN+' liga(s) de SKU de Amazon → ERP':'')+(quit?'\n• 🔁 Reemplacé el registro anterior de este envío ('+quit+' movimientos).':'')); }
+function envFbaDeshacer(id){ const ms=MOVS.filter(m=>m.tipo==='Envío a Amazon FBA'&&m.ref===id); if(!ms.length) return;
+  if(!confirm('¿Deshacer el envío '+id+'?\n\nQuito '+ms.length+' movimientos: baja de Amazon FBA y las piezas regresan a tu bodega.')) return;
+  for(let i=MOVS.length-1;i>=0;i--){ if(MOVS[i].tipo==='Envío a Amazon FBA'&&MOVS[i].ref===id) MOVS.splice(i,1); }
+  saveMovs(); recomputeLive(); afterMov(); envFbaRender(); }
+document.addEventListener('change',e=>{ if(e.target.id==='envFbaFile'){ const f=e.target.files[0]; if(f) envFbaLoad(f); e.target.value=''; }
+  else if(e.target.classList&&e.target.classList.contains('envFbaMap')&&ENVFBA){ const r=ENVFBA.rows[+e.target.dataset.i]; if(r){ r.map=(''+e.target.value).trim(); if($('envFbaFecha')) ENVFBA.fecha=$('envFbaFecha').value; envFbaRender(); } } });
+document.addEventListener('click',e=>{ const t=e.target; if(!t||!t.id&&!t.classList) return;
+  if(t.id==='envFbaOk') envFbaAplicar(); else if(t.id==='envFbaNo'){ ENVFBA=null; envFbaRender(); }
+  else if(t.classList&&t.classList.contains('envFbaUndo')) envFbaDeshacer(t.dataset.id); });
 function registrarEnvioFBA(prov,nota){
   const plan=[]; let totFba=0,totBod=0; const lineas=[];
   for(const it of LOTE){ const sku=it.sku, n=parseNum(it.cant)||0; if(n<=0) continue;
