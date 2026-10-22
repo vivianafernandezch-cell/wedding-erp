@@ -137,7 +137,7 @@
     </div>
   </div>
 
-  <div class="card hide" id="mapCard">
+  <div class="card hide noplg" id="mapCard">
     <h2><span class="step">2</span> Confirma las columnas de ventas</h2>
     <div id="mlBanner"></div>
     <div class="row" id="mapFields"></div>
@@ -1777,7 +1777,7 @@ function showTab(name){ try{ sessionStorage.setItem('erp_tab',name); }catch(e){}
 /* ---------- carga ventas ---------- */
 function onData(grid){ const t=rowsToTable(grid); if(!t||!t.headers.length){ alert('No pude leer datos.'); return; }
   RAW=t; MAPPING=autoMap(t.headers); buildMapFields(); showMlBanner();
-  $('mapCard').classList.remove('hide'); $('placeholder').classList.add('hide'); $('mapCard').scrollIntoView({behavior:'smooth',block:'start'}); }
+  $('mapCard').classList.remove('hide','plegada'); $('placeholder').classList.add('hide'); $('mapCard').scrollIntoView({behavior:'smooth',block:'start'}); }
 function showMlBanner(){ const b=$('mlBanner'); if(MAPPING.neto||MAPPING.comision){ b.className='banner ok'; b.textContent='✓ Detecté columnas de Mercado Libre — usaré tu comisión y envío REALES.'; } else { b.className='banner info'; b.textContent='ℹ️ Sin columnas de cargos de ML; usaré la comisión estimada. Revisa el mapeo.'; } }
 const FIELDS=[['clave','Clave / SKU','e'],['nombre','Producto (título)','e'],['unidades','Unidades vendidas','e'],['ingreso','Ingresos por productos','m'],['neto','Total neto (lo que depositan)','m'],['comision','Cargo por venta (comisión)','m'],['envio','Costos de envío','m'],['precio','Precio unitario','m']];
 function buildMapFields(){ let html=''; for(const[f,lbl,g]of FIELDS){ if(g==='e') html+=fieldHtml(f,lbl); } html+='<div class="group-title" style="width:100%">Para margen real (tu Excel de ML las trae)</div>'; for(const[f,lbl,g]of FIELDS){ if(g==='m') html+=fieldHtml(f,lbl); }
