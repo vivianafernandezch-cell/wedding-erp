@@ -2182,29 +2182,39 @@ function renderConteo(){ const v=$('view-conteo'); if(!v) return; CONTEO=loadJSO
       '<div class="row" style="gap:8px"><button class="btn" id="cntApply">✅ Aplicar esta parte'+(dd.length?' ('+dd.length+' ajustes)':'')+'</button><button class="btn ghost sm" id="cntCsv">⬇️ CSV</button></div></div>'+hist; return; }
   const q=norm(CNTQ||''); let arr=q?[...new Set([...U,...Object.keys(INVNAME||{})])].filter(k=>!HIDDEN.has(k)&&norm(k+' '+(nombrePieza(k)||'')).includes(q)).slice(0,60):lista(CNTG);
   arr=arr.slice().sort((a,b)=>(''+(nombrePieza(a)||a)).localeCompare(''+(nombrePieza(b)||b),'es')); if(CNTOCULTA) arr=arr.filter(k=>!hecho(k));
-  const row=k=>{ const x=A.items[k]; return '<div class="cntrow'+(x?' ok':'')+'" data-sku="'+escapeHtml(k)+'">'+(typeof fotoThumb==='function'?fotoThumb(k):'')+'<div class="nm">'+escapeHtml(nombrePieza(k)||k)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(k)+(A.ciego?'':' · ERP: '+num.format(LIVE.bodega[k]||0))+'</span>'+(x&&x.ap?' <span class="badge b-good" style="font-size:10px">✔ aplicado '+fechaBonita(x.ap)+'</span>':x?' <span class="badge" style="font-size:10px">contado '+fechaBonita(cntDia(x.t))+'</span>':'')+'</div>'+
+  const row=k=>{ const x=A.items[k]; return '<div class="cntrow'+(x?' ok':'')+'" data-sku="'+escapeHtml(k)+'">'+(typeof fotoThumb==='function'?fotoThumb(k):'')+'<div class="nm">'+escapeHtml(nombrePieza(k)||k)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(k)+'<span class="cntE">'+cntInfo(k)+'</span></span>'+(x&&x.ap?' <span class="badge b-good" style="font-size:10px">✔ aplicado '+fechaBonita(x.ap)+'</span>':x?' <span class="badge" style="font-size:10px">contado '+fechaBonita(cntDia(x.t))+'</span>':'')+'</div>'+
     '<input type="number" inputmode="numeric" min="0" step="1" class="cntIn" data-sku="'+escapeHtml(k)+'" value="'+(x?x.q:'')+'" placeholder="?"><button class="btn ghost sm cntZero" data-sku="'+escapeHtml(k)+'" title="No hay ninguno">0</button></div>'; };
   v.innerHTML='<div class="card noplg" style="padding:12px 14px"><div class="tbar"><h3 class="vh">📋 Contando tu bodega <span style="font-weight:400;color:var(--muted);font-size:12px">desde '+fechaBonita(A.inicio)+(A.ciego?' · a ciegas':'')+'</span></h3><b id="cntN">'+its.length+' contados · '+nAp+' aplicados</b></div>'+
     '<input type="search" id="cntSearch" placeholder="🔍 Busca por nombre o SKU (también los que no aparecen)" value="'+escapeHtml(CNTQ)+'" style="width:100%;font-size:16px;padding:10px;margin:6px 0">'+
     '<div class="cntchips">'+chip('neg','⚠️ Negativos',[...negS])+chip('top','⭐ Más vendidos',[...topS])+gs.map(g=>chip(g,escapeHtml(g),G[g])).join('')+(otros.length?chip('otros','Otros',otros):'')+chip('todos','Todos',U)+'</div>'+
-    '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:2px 0 6px"><input type="checkbox" id="cntOculta" '+(CNTOCULTA?'checked':'')+' style="width:auto"> Ocultar los que ya conté</label>'+
+    '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:2px 0 6px"><input type="checkbox" id="cntOculta" '+(CNTOCULTA?'checked':'')+' style="width:auto"> Ocultar los que ya conté</label>'+(A.ciego?'<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:2px 0 6px"><input type="checkbox" id="cntVer" '+(CNTVER?'checked':'')+' style="width:auto"> Ver cuánto tiene el ERP y la diferencia</label>':'')+
     (arr.length?arr.map(row).join(''):'<p class="hint">'+(q?'No encontré ese producto.':'Ya contaste todo este grupo. 🎉')+'</p>')+
     '<div class="row" style="gap:8px;margin-top:12px;position:sticky;bottom:0;background:var(--card);padding:8px 0;flex-wrap:wrap"><button class="btn" id="cntDif">🔎 Ver diferencias ('+nPend+')</button><button class="btn ghost sm" id="cntFin">🏁 Terminar conteo</button></div></div>'+hist; }
+let CNTVER=(()=>{ try{ return localStorage.getItem('erp_cnt_ver')==='1'; }catch(e){ return false; } })();   // ver ERP + diferencia mientras cuentas (por aparato)
+function cntVe(){ const A=CONTEO.act; return !!A&&(!A.ciego||CNTVER); }
+function cntInfo(k,qTxt){ const A=CONTEO.act, x=A&&A.items[k]; if(!cntVe()) return '';
+  const q=qTxt!=null?(qTxt===''?null:parseNum(qTxt)):(x?x.q:null);
+  const e=(x&&x.ap)||q==null?parseNum(LIVE.bodega[k]||0):(x&&qTxt==null?cntEsperado(k,x.t):cntEsperado(k,Date.now()));
+  let h=' · ERP: <b>'+num.format(e)+'</b>';
+  if(q!=null&&!(x&&x.ap&&qTxt==null)){ const d=+(q-e).toFixed(3); h+=d===0?' · <b style="color:var(--good,#1e7b34)">✅ cuadra</b>':' · <b style="color:'+(d<0?'var(--bad,#b3261e)':'var(--good,#1e7b34)')+'">'+(d>0?'+':'')+num.format(d)+(d<0?' faltan':' sobran')+'</b>'; }
+  return h; }
 function cntContador(){ const A=CONTEO.act; if(!A) return; const its=Object.values(A.items), ap=its.filter(x=>x.ap).length, b=$('cntDif'); if(b) b.textContent='🔎 Ver diferencias ('+(its.length-ap)+')'; const h=$('cntN'); if(h) h.textContent=its.length+' contados · '+ap+' aplicados'; }
 document.addEventListener('click',e=>{ const t=e.target; if(!t.closest('#view-conteo')) return;
   if(t.id==='cntStart') return cntEmpezar($('cntCiego')&&$('cntCiego').checked);
   const g=t.closest('.cntG'); if(g){ CNTG=g.dataset.g; CNTQ=''; try{ sessionStorage.setItem('erp_cntg',CNTG); }catch(e){} return renderConteo(); }
-  if(t.classList.contains('cntZero')){ cntSet(t.dataset.sku,0); const r=t.closest('.cntrow'); if(r){ r.classList.add('ok'); r.querySelector('.cntIn').value=0; } cntContador(); return; }
+  if(t.classList.contains('cntZero')){ cntSet(t.dataset.sku,0); const r=t.closest('.cntrow'); if(r){ r.classList.add('ok'); r.querySelector('.cntIn').value=0; const ce=r.querySelector('.cntE'); if(ce) ce.innerHTML=cntInfo(t.dataset.sku); } cntContador(); return; }
   if(t.id==='cntDif'){ CNTDIF=true; renderConteo(); window.scrollTo(0,0); return; }
   if(t.id==='cntBack'){ CNTDIF=false; return renderConteo(); }
   if(t.id==='cntApply') return cntAplicar();
   if(t.id==='cntFin') return cntTerminar();
   if(t.id==='cntCsv') return dl('conteo-fisico.csv',['SKU','Producto','Contado el','ERP ese dia','Contaste','Diferencia','Valor'],cntDifs().map(x=>[x.sku,nombrePieza(x.sku),x.f,x.e,x.q,x.d,x.v]));
   if(t.classList.contains('cntUndo')) return cntDeshacer(t.dataset.id); });
-document.addEventListener('change',e=>{ const t=e.target; if(t.classList&&t.classList.contains('cntIn')){ cntSet(t.dataset.sku,t.value.trim()); const r=t.closest('.cntrow'); if(r) r.classList.toggle('ok',t.value.trim()!==''); cntContador(); }
-  if(t.id==='cntOculta'){ CNTOCULTA=t.checked; renderConteo(); } });
+document.addEventListener('change',e=>{ const t=e.target; if(t.classList&&t.classList.contains('cntIn')){ cntSet(t.dataset.sku,t.value.trim()); const r=t.closest('.cntrow'); if(r){ r.classList.toggle('ok',t.value.trim()!==''); const ce=r.querySelector('.cntE'); if(ce) ce.innerHTML=cntInfo(t.dataset.sku); } cntContador(); }
+  if(t.id==='cntOculta'){ CNTOCULTA=t.checked; renderConteo(); }
+  if(t.id==='cntVer'){ CNTVER=t.checked; try{ localStorage.setItem('erp_cnt_ver',CNTVER?'1':'0'); }catch(e){} renderConteo(); } });
 document.addEventListener('keydown',e=>{ const t=e.target; if(t.classList&&t.classList.contains('cntIn')&&e.key==='Enter'){ e.preventDefault(); t.blur(); const all=[...document.querySelectorAll('.cntIn')], i=all.indexOf(t); if(all[i+1]) all[i+1].focus(); } });
-document.addEventListener('input',e=>{ if(e.target.id==='cntSearch'){ CNTQ=e.target.value; clearTimeout(window._cntT); window._cntT=setTimeout(()=>{ renderConteo(); const s=$('cntSearch'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },350); } });
+document.addEventListener('input',e=>{ if(e.target.classList&&e.target.classList.contains('cntIn')){ const r=e.target.closest('.cntrow'), ce=r&&r.querySelector('.cntE'); if(ce) ce.innerHTML=cntInfo(e.target.dataset.sku,e.target.value.trim()); return; }
+  if(e.target.id==='cntSearch'){ CNTQ=e.target.value; clearTimeout(window._cntT); window._cntT=setTimeout(()=>{ renderConteo(); const s=$('cntSearch'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },350); } });
 function inicioCalendario(){ const D=inicioDatos(), mesPrev=(()=>{ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
   const cm=Object.keys(CONC.meses||{}).sort().pop()||'', bm=Object.keys(CONC.banco||{}).sort().pop()||'', ul=D.liqs[0];
   const QUIEN={p:'<span class="badge b-blue" title="Lo hago yo sola en la tarea programada">🤖 Perla</span>',t:'<span class="badge" style="background:#fdeee8;color:#b5523b" title="Esto lo subes o registras tú">🙋‍♀️ Tú</span>',pt:'<span class="badge b-blue" title="Yo bajo el reporte y dejo listo el cuadre">🤖 Perla baja</span> <span class="badge" style="background:#fdeee8;color:#b5523b" title="Tú revisas y le das Ajustar">🙋‍♀️ tú apruebas</span>'};
