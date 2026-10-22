@@ -50,6 +50,13 @@
   body.canal-ml .solo-amz, body.canal-amz .solo-ml{display:none!important}
   .pend{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
   .pend:first-of-type{border-top:none}
+  .plhead{cursor:pointer;user-select:none}
+  .plch{display:inline-block;margin-left:8px;font-size:12px;color:var(--muted);transition:transform .15s}
+  .card.plegada .plch{transform:rotate(-90deg)}
+  .card.plegada > :not(.plhead){display:none!important}
+  .card.plegada{padding-bottom:12px}
+  .dropz{display:block;border:2px dashed var(--line);border-radius:14px;padding:22px;text-align:center;background:var(--card);cursor:pointer}
+  .dropz.over{border-color:var(--accent);background:var(--warn-bg)}
   /* kpis */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:8px 0}
   .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow)}
@@ -300,7 +307,11 @@
 
   <div class="view hide" id="view-movim"></div>
   <div class="view hide" id="view-reportes">
-    <p class="hint" style="margin:4px 0 2px">Aquí subes <b>todos</b> tus reportes. Cada tarjeta dice qué hace y dónde bajar el archivo; el resultado aparece debajo.</p>
+    <div class="card noplg" id="dropCard"><h3 class="vh">📥 Sube tus reportes de <span id="dropCanal">tu canal</span></h3>
+      <div class="dropz" id="dropZone"><input type="file" id="dropFiles" multiple accept=".xlsx,.csv,.txt,.tsv,.pdf" style="display:none"><div style="font-size:26px">⬆️</div><b>Arrastra aquí tus archivos o haz clic para elegirlos</b><div class="hint" style="margin:4px 0 0">Puedes subir varios juntos: yo reconozco cuál es cuál y lo mando a su lugar.</div></div>
+      <div id="dropMsg" style="margin-top:10px;font-size:13px"></div>
+      <div id="dropCal" style="margin-top:8px"></div></div>
+    <p class="hint" style="margin:4px 0 2px">Abajo están las tarjetas de cada reporte, por si quieres subir uno en particular o ver el resultado.</p>
     <div class="solo-ml"><h2 style="margin:20px 0 4px">🛒 Mercado Libre</h2>
     <div id="slotVentasML"></div>
     <div id="slotPub"></div>
@@ -1751,7 +1762,7 @@ function radarHtml(){ const C=(COMPUTED||[]).filter(p=>!HIDDEN.has(p.key)), uv=u
     return _aa(); }; })();
 
 function refresh(){ recomputeLive(); try{ applyHideRules(); }catch(e){ console.error(e); } ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderAmzRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); renderDevol(); renderConc(); try{ renderInicio(); renderResAmz(); renderDevAmz(); }catch(e){ console.error(e); } }
-function showTab(name){ if(name==='inicio') try{ renderInicio(); }catch(e){ console.error(e); } if(name==='resamz') try{ renderResAmz(); }catch(e){ console.error(e); } if(name==='devamz') try{ renderDevAmz(); }catch(e){ console.error(e); } TAB=name; document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hide',v.id!=='view-'+name)); }
+function showTab(name){ if(name==='reportes') try{ renderDropCal(); }catch(e){} if(name==='inicio') try{ renderInicio(); }catch(e){ console.error(e); } if(name==='resamz') try{ renderResAmz(); }catch(e){ console.error(e); } if(name==='devamz') try{ renderDevAmz(); }catch(e){ console.error(e); } TAB=name; document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hide',v.id!=='view-'+name)); }
 
 /* ---------- carga ventas ---------- */
 function onData(grid){ const t=rowsToTable(grid); if(!t||!t.headers.length){ alert('No pude leer datos.'); return; }
@@ -2053,13 +2064,61 @@ function inicioPendientes(D){ const P=[], add=(c,lvl,t,tab,canal)=>P.push({c,lvl
   if(D.neg) add('todo','bad','🔴 '+D.neg+' '+(D.neg===1?'producto':'productos')+' con inventario en negativo: cuéntalos','inventario','todo');
   if(D.nProv) add('todo','warn','🛒 '+D.nProv+' '+(D.nProv===1?'producto':'productos')+' por pedir a tu proveedor','reabasto',CANAL==='amz'?'amz':'ml');
   return P.filter(x=>CANAL==='todo'||x.c===CANAL||x.c==='todo'); }
+/* ---------- 📥 ZONA ÚNICA: reconoce cada archivo y lo manda a su lugar ---------- */
+const DROPT={file:'🛒 Ventas de Mercado Libre',pubFile:'📋 Publicaciones de ML',fullFile:'⚡ Reporte de Full',e2fFile:'📤 Envío a Full',concFiles:'🏦 Mercado Pago / Facturación (conciliación ML)',concAmzFiles:'💵 Liquidación de Amazon',amzFbmFile:'📦 Pedidos de Amazon (dar salida)',amzSalesFile:'📊 Ganancia de Amazon',amzFile:'📦 Inventario de Amazon FBA',banco:'🏦 Estado de cuenta del banco'};
+async function dropDetect(f){ if(/\.pdf$/i.test(f.name)) return 'banco'; if(/\.json$/i.test(f.name)) return '';
+  let rows=null, txt=''; if(/\.xlsx$/i.test(f.name)){ rows=await parseXLSX(await f.arrayBuffer()); txt=rows.slice(0,15).map(r=>(r||[]).join('|')).join('\n'); } else txt=(await f.text()).slice(0,6000);
+  const t=txt.toLowerCase();
+  if(t.includes('settlement-id')) return 'concAmzFiles';
+  if(t.includes('amazon-order-id')||(t.includes('order-id')&&t.includes('quantity-purchased'))) return 'amzFbmFile';
+  if(t.includes('unidades netas vendidas')||t.includes('ingresos netos en total')) return 'amzSalesFile';
+  if(t.includes('afn-')||t.includes('fnsku')) return 'amzFile';
+  if(rows){ const c=concDetect(rows); if(c==='ventas') return 'file'; if(c) return 'concFiles'; }
+  if((t.includes('item_id')&&t.includes('sku'))||t.includes('numero de publicacion')||t.includes('número de publicación')) return 'pubFile';
+  if(/inbound/i.test(f.name)) return 'e2fFile';
+  if(t.includes('aptas para vender')||t.includes('unidades en full')) return 'fullFile';
+  if(t.includes('# de venta')) return 'file';
+  return ''; }
+function dropSend(id,files){ const inp=$(id); if(!inp||!files.length) return; const dt=new DataTransfer(); files.forEach(f=>dt.items.add(f)); inp.files=dt.files; inp.dispatchEvent(new Event('change',{bubbles:true}));
+  const c=inp.closest('.card'); if(c) c.classList.remove('plegada'); }
+async function dropFiles(files){ const js=files.filter(f=>/\.json$/i.test(f.name)); files=files.filter(f=>!js.includes(f)); const msg=$('dropMsg'); if(!files.length) return; msg.innerHTML='<span class="spin"></span>Revisando '+files.length+' '+(files.length===1?'archivo':'archivos')+'…';
+  const G={}, raros=[], lines=[];
+  for(const f of files){ let d=''; try{ d=await dropDetect(f); }catch(e){ console.error(e); } if(!d){ raros.push(f.name); continue; } (G[d]=G[d]||[]).push(f); }
+  if(G.banco){ (G[CANAL==='amz'?'concAmzFiles':'concFiles']=G[CANAL==='amz'?'concAmzFiles':'concFiles']||[]).push(...G.banco); }
+  const orden=['file','pubFile','fullFile','e2fFile','amzFile','amzSalesFile','amzFbmFile','concFiles','concAmzFiles'];
+  for(const id of orden){ const fs=G[id]; if(!fs) continue; const banco=G.banco&&fs.some(f=>G.banco.includes(f));
+    lines.push('✅ '+fs.map(f=>'<b>'+escapeHtml(f.name)+'</b>').join(', ')+' → '+(fs.every(f=>G.banco&&G.banco.includes(f))?DROPT.banco:DROPT[id]+(banco?' + '+DROPT.banco:''))+
+      (id==='concFiles'?' <button class="btn ghost sm goTab" data-tab="conc" data-canal="ml">Ir a Conciliación y darle Conciliar ▸</button>':id==='concAmzFiles'?' <button class="btn ghost sm goTab" data-tab="conc" data-canal="amz">Ver en Conciliación ▸</button>':''));
+    dropSend(id,fs); await new Promise(r=>setTimeout(r,400)); }
+  msg.innerHTML=lines.join('<br>')+(raros.length?(lines.length?'<br>':'')+'⚠️ No reconocí: '+raros.map(escapeHtml).join(', ')+'. Súbelo en su tarjeta de abajo.':'')+(js.length?'<br>💾 '+js.map(f=>escapeHtml(f.name)).join(', ')+' parece un respaldo: cárgalo en la tarjeta 💾 Respaldo de abajo (reemplaza tus datos).':'')+
+    (lines.some(l=>!/Conciliación/.test(l))?'<p class="hint" style="margin:6px 0 0">Si alguno pide elegir columnas o confirmar, lo ves abajo en su tarjeta (ya la abrí).</p>':''); }
+(function(){ const z=$('dropZone'), inp=$('dropFiles'); if(!z||!inp) return;
+  inp.addEventListener('change',e=>{ dropFiles([...e.target.files]); e.target.value=''; });
+  z.addEventListener('click',e=>{ if(e.target!==inp) inp.click(); });
+  ['dragenter','dragover'].forEach(ev=>z.addEventListener(ev,e=>{ e.preventDefault(); z.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev=>z.addEventListener(ev,e=>{ e.preventDefault(); z.classList.remove('over'); }));
+  z.addEventListener('drop',e=>{ dropFiles([...(e.dataTransfer&&e.dataTransfer.files||[])]); }); })();
+function renderDropCal(){ const c=$('dropCal'), n=$('dropCanal'); if(n) n.textContent=CANAL==='amz'?'Amazon':CANAL==='ml'?'Mercado Libre':'tus canales'; if(c) c.innerHTML='<b style="font-size:13px">🗓️ Qué te toca subir</b>'+inicioCalendario().replace(/<button class="btn ghost sm goTab"[^>]*>Subir ▸<\/button>/g,''); }
+/* ---------- 🗂️ PÁGINAS CORTAS: cada tarjeta se pliega con un clic (lo recuerdo) ---------- */
+let PLEG=(()=>{ try{ return JSON.parse(localStorage.getItem('erp_plegado')||'{}'); }catch(e){ return {}; } })();
+function plKey(view,h){ return view+'|'+(h.textContent||'').replace(/▾/g,'').replace(/\([^)]*\)/g,'').replace(/[\d$.,%—–-]+/g,' ').replace(/\s+/g,' ').trim().slice(0,48); }
+function plegarTarjetas(){ document.querySelectorAll('.view').forEach(v=>{ if(v.id==='view-inicio') return; let i=0;
+  v.querySelectorAll('.card:not([data-plg])').forEach(card=>{ card.dataset.plg='1'; if(card.classList.contains('noplg')) return;
+    const head=[...card.children].find(ch=>ch.matches('h2,h3')||(ch.matches('.tbar')&&ch.querySelector('h2,h3'))); if(!head) return;
+    const h=head.matches('h2,h3')?head:head.querySelector('h2,h3'); head.classList.add('plhead'); if(!h.querySelector('.plch')) h.insertAdjacentHTML('beforeend','<span class="plch">▾</span>');
+    const k=plKey(v.id,h); card.dataset.plk=k; const idx=i++;
+    const def=v.id==='view-reportes'?true:(idx>=2&&!/revisar|pendiente|cuadra|utilidad real|⚠️|✅/i.test(h.textContent||''));
+    card.classList.toggle('plegada',k in PLEG?!!PLEG[k]:def); }); }); }
+document.addEventListener('click',e=>{ const hd=e.target.closest('.plhead'); if(!hd||e.target.closest('button,input,select,a,label,textarea,summary')) return; const card=hd.closest('.card'); if(!card) return;
+  card.classList.toggle('plegada'); PLEG[card.dataset.plk]=card.classList.contains('plegada')?1:0; try{ localStorage.setItem('erp_plegado',JSON.stringify(PLEG)); }catch(e){} });
+(function(){ let t=null; new MutationObserver(()=>{ clearTimeout(t); t=setTimeout(()=>{ try{ plegarTarjetas(); }catch(e){ console.error(e); } },60); }).observe(document.body,{childList:true,subtree:true}); })();
 function inicioCalendario(){ const D=inicioDatos(), mesPrev=(()=>{ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
   const cm=Object.keys(CONC.meses||{}).sort().pop()||'', ul=D.liqs[0];
   const R=[['ml','🛒 Ventas de Mercado Libre','cada lunes',D.uv,7],['ml','⚡ Reporte de Full (cuadre)','cada mes',D.uf,31],['ml','🏦 Mercado Pago + banco (conciliación)','cada mes',cm?cm+'-28':'',cm>=mesPrev?99999:0],
     ['amz','📦 Todos los pedidos de Amazon','cada lunes',D.ua,7],['amz','💵 Liquidaciones de Amazon','cada 15 días',ul?ul.fin:'',17],['amz','📊 Inventario de Amazon FBA (cuadre)','cada mes',D.uaz,31]];
   return R.filter(r=>CANAL==='todo'||r[0]===CANAL).map(([c,n,cada,f,lim])=>{ const d=diasDesde(f), ok=f&&(lim===99999||(d!=null&&d<=lim));
-    return '<div class="pend"><span>'+n+' <span style="color:var(--muted);font-size:12px">· '+cada+'</span></span><span style="white-space:nowrap"><span class="badge '+(ok?'b-good':'b-warn')+'">'+(f?(c==='ml'&&n.includes('conciliación')?concMesNombre(cm):'hace '+d+' d'):'sin subir')+'</span> <button class="btn ghost sm goTab" data-tab="'+(n.includes('conciliación')||n.includes('Liquidaciones')?'conc':'reportes')+'" data-canal="'+c+'">Subir ▸</button></span></div>'; }).join(''); }
-function renderInicio(){ const v=$('view-inicio'); if(!v) return; const D=inicioDatos(), P=inicioPendientes(D);
+    return '<div class="pend"><span>'+n+' <span style="color:var(--muted);font-size:12px">· '+cada+'</span></span><span style="white-space:nowrap"><span class="badge '+(ok?'b-good':'b-warn')+'">'+(f?(c==='ml'&&n.includes('conciliación')?concMesNombre(cm):d===0?'hoy':d===1?'ayer':'hace '+d+' d'):'sin subir')+'</span> <button class="btn ghost sm goTab" data-tab="'+(n.includes('conciliación')||n.includes('Liquidaciones')?'conc':'reportes')+'" data-canal="'+c+'">Subir ▸</button></span></div>'; }).join(''); }
+function renderInicio(){ try{ renderDropCal(); }catch(e){} const v=$('view-inicio'); if(!v) return; const D=inicioDatos(), P=inicioPendientes(D);
   const kp=CANAL==='ml'?[['💵 Ingreso ML',mxn.format(D.ing),num.format(D.uds)+' uds en el periodo',''],['💰 Ganancia ML',mxn.format(D.gan),'ya menos tu costo',D.gan>=0?'good':'bad'],['📤 A mandar a Full',D.nFull,'productos','blue'],['🛒 A pedir a proveedor',D.nProv,'productos',D.nProv?'bad':'']]
     :CANAL==='amz'?[['💵 Ventas Amazon',D.AT.ventas>0?mxn.format(D.AT.ventas):'—',D.AT.ventas>0?num.format(D.AT.u)+' uds':'sube el reporte de ganancia',''],['💰 Ganancia Amazon',D.AT.ventas>0?mxn.format(D.AT.gan):'—','ya menos tu costo',D.AT.gan>=0?'good':'bad'],['📦 A mandar a FBA',D.nFba,'productos','blue'],['💵 Último pago',D.liqs[0]?mxn2.format(D.liqs[0].tot):'—',D.liqs[0]?'depósito '+fechaBonita(D.liqs[0].dep):'sube tus liquidaciones',D.liqs[0]&&D.liqs[0].tot<0?'bad':'good']]
     :[['💰 Ganancia ML',mxn.format(D.gan),'periodo seleccionado',D.gan>=0?'good':'bad'],['💰 Ganancia Amazon',D.AT.ventas>0?mxn.format(D.AT.gan):'—','acumulado del reporte',D.AT.gan>=0?'good':'bad'],['📦 Dinero en inventario',mxn.format(D.IT.total),'bodega + Full + FBA','blue'],['✅ Pendientes',P.length,P.length?'abajo te digo qué hacer':'todo al día',P.length?'warn':'good']];
