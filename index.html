@@ -2098,7 +2098,7 @@ async function dropFiles(files){ const js=files.filter(f=>/\.json$/i.test(f.name
   ['dragenter','dragover'].forEach(ev=>z.addEventListener(ev,e=>{ e.preventDefault(); z.classList.add('over'); }));
   ['dragleave','drop'].forEach(ev=>z.addEventListener(ev,e=>{ e.preventDefault(); z.classList.remove('over'); }));
   z.addEventListener('drop',e=>{ dropFiles([...(e.dataTransfer&&e.dataTransfer.files||[])]); }); })();
-function renderDropCal(){ const c=$('dropCal'), n=$('dropCanal'); if(n) n.textContent=CANAL==='amz'?'Amazon':CANAL==='ml'?'Mercado Libre':'tus canales'; if(c) c.innerHTML='<b style="font-size:13px">🗓️ Qué te toca subir</b>'+inicioCalendario().replace(/<button class="btn ghost sm goTab"[^>]*>Subir ▸<\/button>/g,''); }
+function renderDropCal(){ const c=$('dropCal'), n=$('dropCanal'); if(n) n.textContent=CANAL==='amz'?'Amazon':CANAL==='ml'?'Mercado Libre':'tus canales'; if(c) c.innerHTML='<b style="font-size:13px">🗓️ Qué te toca subir</b>'+inicioCalendario().replace(/<button class="btn ghost sm goTab"[^>]*>(Ir|Registrar) ▸<\/button>/g,''); }
 /* ---------- 🗂️ PÁGINAS CORTAS: cada tarjeta se pliega con un clic (lo recuerdo) ---------- */
 let PLEG=(()=>{ try{ return JSON.parse(localStorage.getItem('erp_plegado')||'{}'); }catch(e){ return {}; } })();
 function plKey(view,h){ return view+'|'+(h.textContent||'').replace(/▾/g,'').replace(/\([^)]*\)/g,'').replace(/[\d$.,%—–-]+/g,' ').replace(/\s+/g,' ').trim().slice(0,48); }
@@ -2113,11 +2113,22 @@ document.addEventListener('click',e=>{ const hd=e.target.closest('.plhead'); if(
   card.classList.toggle('plegada'); PLEG[card.dataset.plk]=card.classList.contains('plegada')?1:0; try{ localStorage.setItem('erp_plegado',JSON.stringify(PLEG)); }catch(e){} });
 (function(){ let t=null; new MutationObserver(()=>{ clearTimeout(t); t=setTimeout(()=>{ try{ plegarTarjetas(); }catch(e){ console.error(e); } },60); }).observe(document.body,{childList:true,subtree:true}); })();
 function inicioCalendario(){ const D=inicioDatos(), mesPrev=(()=>{ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
-  const cm=Object.keys(CONC.meses||{}).sort().pop()||'', ul=D.liqs[0];
-  const R=[['ml','🛒 Ventas de Mercado Libre','cada lunes',D.uv,7],['ml','⚡ Reporte de Full (cuadre)','cada mes',D.uf,31],['ml','🏦 Mercado Pago + banco (conciliación)','cada mes',cm?cm+'-28':'',cm>=mesPrev?99999:0],
-    ['amz','📦 Todos los pedidos de Amazon','cada lunes',D.ua,7],['amz','💵 Liquidaciones de Amazon','cada 15 días',ul?ul.fin:'',17],['amz','📊 Inventario de Amazon FBA (cuadre)','cada mes',D.uaz,31]];
-  return R.filter(r=>CANAL==='todo'||r[0]===CANAL).map(([c,n,cada,f,lim])=>{ const d=diasDesde(f), ok=f&&(lim===99999||(d!=null&&d<=lim));
-    return '<div class="pend"><span>'+n+' <span style="color:var(--muted);font-size:12px">· '+cada+'</span></span><span style="white-space:nowrap"><span class="badge '+(ok?'b-good':'b-warn')+'">'+(f?(c==='ml'&&n.includes('conciliación')?concMesNombre(cm):d===0?'hoy':d===1?'ayer':'hace '+d+' d'):'sin subir')+'</span> <button class="btn ghost sm goTab" data-tab="'+(n.includes('conciliación')||n.includes('Liquidaciones')?'conc':'reportes')+'" data-canal="'+c+'">Subir ▸</button></span></div>'; }).join(''); }
+  const cm=Object.keys(CONC.meses||{}).sort().pop()||'', bm=Object.keys(CONC.banco||{}).sort().pop()||'', ul=D.liqs[0];
+  const QUIEN={p:'<span class="badge b-blue" title="Lo hago yo sola en la tarea programada">🤖 Perla</span>',t:'<span class="badge" style="background:#fdeee8;color:#b5523b" title="Esto lo subes o registras tú">🙋‍♀️ Tú</span>',pt:'<span class="badge b-blue" title="Yo bajo el reporte y dejo listo el cuadre">🤖 Perla baja</span> <span class="badge" style="background:#fdeee8;color:#b5523b" title="Tú revisas y le das Ajustar">🙋‍♀️ tú apruebas</span>'};
+  /* [canal, reporte, cuándo, quién, fecha última, días máx (o 'mes' / 'pasa'), pestaña] */
+  const R=[['ml','🛒 Ventas de Mercado Libre','cada lunes 9 am','p',D.uv,7,'reportes'],
+    ['ml','🏦 Mercado Pago + facturación ML (conciliación)','1er lunes del mes','p',cm,'mes','conc'],
+    ['ml','⚡ Cuadre de Full','1er lunes del mes','pt',D.uf,31,'reportes'],
+    ['amz','📦 Todos los pedidos de Amazon','cada lunes 9 am','p',D.ua,7,'reportes'],
+    ['amz','💵 Liquidaciones de Amazon','cada 15 días (la bajo el lunes)','p',ul?ul.fin:'',17,'conc'],
+    ['amz','📊 Cuadre de Amazon FBA','1er lunes del mes','pt',D.uaz,31,'reportes'],
+    ['todo','🏦 Estado de cuenta BanBajío (PDF)','1ª semana del mes','t',bm,'mes','conc'],
+    ['todo','📤 Envíos a Full / FBA, compras y devoluciones que llegan','cuando pase','t','','pasa','movim']];
+  const est=(c,f,lim)=>{ if(lim==='pasa') return '<span class="badge">cuando pase</span>'; if(!f) return '<span class="badge b-warn">sin subir</span>';
+    if(lim==='mes') return '<span class="badge '+(f>=mesPrev?'b-good':'b-warn')+'">'+concMesNombre(f.slice(0,7))+'</span>'; const d=diasDesde(f); return '<span class="badge '+(d!=null&&d<=lim?'b-good':'b-warn')+'">'+(d===0?'hoy':d===1?'ayer':'hace '+d+' d')+'</span>'; };
+  return '<p class="hint" style="margin:0 0 4px">🤖 <b>Perla</b> = lo hago yo sola (tareas de los lunes) · 🙋‍♀️ <b>Tú</b> = lo subes, registras o apruebas tú</p>'+
+    R.filter(r=>CANAL==='todo'||r[0]===CANAL||r[0]==='todo').map(([c,n,cada,q,f,lim,tab])=>
+    '<div class="pend"><span>'+n+' <span style="color:var(--muted);font-size:12px">· '+cada+'</span><br>'+QUIEN[q]+'</span><span style="white-space:nowrap">'+est(c,f,lim)+' <button class="btn ghost sm goTab" data-tab="'+tab+'" data-canal="'+(c==='todo'?(CANAL==='amz'?'amz':'ml'):c)+'">'+(tab==='movim'?'Registrar ▸':'Ir ▸')+'</button></span></div>').join(''); }
 function renderInicio(){ try{ renderDropCal(); }catch(e){} const v=$('view-inicio'); if(!v) return; const D=inicioDatos(), P=inicioPendientes(D);
   const kp=CANAL==='ml'?[['💵 Ingreso ML',mxn.format(D.ing),num.format(D.uds)+' uds en el periodo',''],['💰 Ganancia ML',mxn.format(D.gan),'ya menos tu costo',D.gan>=0?'good':'bad'],['📤 A mandar a Full',D.nFull,'productos','blue'],['🛒 A pedir a proveedor',D.nProv,'productos',D.nProv?'bad':'']]
     :CANAL==='amz'?[['💵 Ventas Amazon',D.AT.ventas>0?mxn.format(D.AT.ventas):'—',D.AT.ventas>0?num.format(D.AT.u)+' uds':'sube el reporte de ganancia',''],['💰 Ganancia Amazon',D.AT.ventas>0?mxn.format(D.AT.gan):'—','ya menos tu costo',D.AT.gan>=0?'good':'bad'],['📦 A mandar a FBA',D.nFba,'productos','blue'],['💵 Último pago',D.liqs[0]?mxn2.format(D.liqs[0].tot):'—',D.liqs[0]?'depósito '+fechaBonita(D.liqs[0].dep):'sube tus liquidaciones',D.liqs[0]&&D.liqs[0].tot<0?'bad':'good']]
@@ -2126,7 +2137,7 @@ function renderInicio(){ try{ renderDropCal(); }catch(e){} const v=$('view-inici
   v.innerHTML='<div class="kpis">'+kp.map(([l,val,sub,c])=>'<div class="kpi '+c+'"><div class="lbl">'+l+'</div><div class="val">'+val+'</div><div class="sub">'+sub+'</div></div>').join('')+'</div>'+
     (lunes?'<div class="card" style="background:var(--warn-bg)"><b>🗓️ Hoy es lunes: toca subir tus reportes de la semana.</b> Abajo ves cuáles.</div>':'')+
     '<div class="card"><h3 class="vh">✅ Pendientes '+(P.length?'('+P.length+')':'')+'</h3>'+(P.length?P.map(x=>'<div class="pend"><span>'+x.t+'</span><span style="white-space:nowrap"><span class="badge '+(x.lvl==='bad'?'b-bad':'b-warn')+'">'+(x.lvl==='bad'?'urgente':'revisar')+'</span> <button class="btn ghost sm goTab" data-tab="'+x.tab+'" data-canal="'+x.canal+'">Ir ▸</button></span></div>').join(''):'<p class="hint" style="margin:0">🎉 Todo al día. No hay nada pendiente.</p>')+'</div>'+
-    '<div class="card"><h3 class="vh">📥 Tus reportes <span style="font-weight:400;color:var(--muted);font-size:12px">— cuándo los subiste por última vez</span></h3>'+inicioCalendario()+'</div>'; }
+    '<div class="card"><h3 class="vh">📥 Tus reportes <span style="font-weight:400;color:var(--muted);font-size:12px">— quién lo sube, cada cuándo y la última vez</span></h3>'+inicioCalendario()+'</div>'; }
 function renderResAmz(){ const v=$('view-resamz'); if(!v) return; const D=inicioDatos(), A=CONC.amz||{}, L=D.liqs;
   const pm={}; L.forEach(S=>{ const m=S.dep.slice(0,7), x=pm[m]||(pm[m]={v:0,c:0,r:0,ret:0,d:0}); x.v+=S.g.venta||0; x.c-=((S.g.com||0)+(S.g.fba||0)+(S.g.env||0)+(S.g.alm||0)+(S.g.pub||0)); x.r-=S.g.reemb||0; x.ret-=S.g.ret||0; x.d+=S.tot; });
   const kp=[['💵 Ventas Amazon',D.AT.ventas>0?mxn.format(D.AT.ventas):'—',D.AT.ventas>0?num.format(D.AT.u)+' uds · reporte de ganancia':'sube el reporte de ganancia en Subir reportes',''],['💰 Ganancia Amazon',D.AT.ventas>0?mxn.format(D.AT.gan):'—','ya menos tu costo',D.AT.gan>=0?'good':'bad'],['📦 Dinero en Amazon FBA',mxn.format(D.IT.fbaVal),num.format(D.IT.fbaUds)+' uds en '+D.IT.fbaSkus+' productos','blue'],['📤 A mandar a FBA',D.nFba,'productos',D.nFba?'warn':'']];
