@@ -42,6 +42,14 @@
   .mtabs{display:flex;gap:6px;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);padding:12px 0;z-index:5;border-bottom:1px solid var(--line);margin-top:6px}
   .mtab{padding:10px 18px;border-radius:11px;background:var(--card);border:1px solid var(--line);font-size:14px;font-weight:600;cursor:pointer;color:var(--muted)}
   .mtab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .chanbar{display:flex;gap:6px;align-items:center;flex-basis:100%;margin-bottom:2px;flex-wrap:wrap}
+  .chanbtn{padding:7px 16px;border-radius:20px;border:1px solid var(--line);background:var(--card);font-size:13px;font-weight:700;cursor:pointer;color:var(--muted)}
+  .chanbtn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .mtab.off{display:none}
+  .mtabsep{width:1px;background:var(--line);margin:4px 4px}
+  body.canal-ml .solo-amz, body.canal-amz .solo-ml{display:none!important}
+  .pend{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
+  .pend:first-of-type{border-top:none}
   /* kpis */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:8px 0}
   .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow)}
@@ -206,18 +214,26 @@
   </div><!-- /dataPanel -->
 
   <div class="mtabs hide" id="mtabs">
-    <div class="mtab active" data-tab="resumen">📊 Resumen del mes</div>
-    <div class="mtab" data-tab="rentab">💰 Rentabilidad</div>
-    <div class="mtab" data-tab="inventario">📦 Inventario</div>
-    <div class="mtab" data-tab="movim">📒 Movimientos</div>
-    <div class="mtab" data-tab="reabasto">🔻 Reabasto</div>
-    <div class="mtab" data-tab="reportes">📥 Reportes</div>
-    <div class="mtab" data-tab="recetas">🧩 Kits / Recetas</div>
-    <div class="mtab" data-tab="devol">↩️ Devoluciones</div>
-    <div class="mtab" data-tab="conc">🏦 Conciliación</div>
+    <div class="chanbar"><b style="font-size:12px;color:var(--muted);margin-right:2px">Canal:</b><button class="chanbtn" data-canal="todo">🔗 Todo junto</button><button class="chanbtn" data-canal="ml">🟡 Mercado Libre</button><button class="chanbtn" data-canal="amz">🟠 Amazon</button></div>
+    <div class="mtab" data-tab="inicio" data-c="todo ml amz">🏠 Inicio</div>
+    <div class="mtab active" data-tab="resumen" data-c="todo ml">📊 Resumen del mes</div>
+    <div class="mtab" data-tab="resamz" data-c="amz">📊 Resumen Amazon</div>
+    <div class="mtab" data-tab="rentab" data-c="todo ml amz">💰 Rentabilidad</div>
+    <div class="mtab" data-tab="reabasto" data-c="ml amz">🔻 Reabasto</div>
+    <div class="mtab" data-tab="conc" data-c="ml amz">🏦 Conciliación</div>
+    <div class="mtab" data-tab="devol" data-c="ml">↩️ Devoluciones</div>
+    <div class="mtab" data-tab="devamz" data-c="amz">↩️ Reembolsos</div>
+    <div class="mtab" data-tab="recetas" data-c="ml amz">🧩 Kits / Recetas</div>
+    <div class="mtab" data-tab="reportes" data-c="ml amz">📥 Subir reportes</div>
+    <span class="mtabsep"></span>
+    <div class="mtab" data-tab="inventario" data-c="todo ml amz">📦 Inventario</div>
+    <div class="mtab" data-tab="movim" data-c="todo ml amz">📒 Movimientos</div>
   </div>
 
+  <div class="view hide" id="view-inicio"></div>
   <div class="view hide" id="view-resumen"></div>
+  <div class="view hide" id="view-resamz"></div>
+  <div class="view hide" id="view-devamz"></div>
   <div class="view hide" id="view-conc"></div>
   <div class="view hide" id="view-devol">
     <div class="tbar"><input type="text" id="devolSearch" placeholder="🔍 Buscar producto, SKU, # de venta o motivo…" style="width:320px"><button class="btn ghost sm" id="devolExport">⬇️ CSV</button></div>
@@ -225,7 +241,7 @@
     <div id="devolBox"></div>
   </div>
 
-  <div class="view hide" id="view-rentab">
+  <div class="view hide" id="view-rentab"><div class="solo-ml">
     <div class="tbar">
       <h3 class="vh">💰 ¿Cuánto me deja cada producto?</h3>
       <div class="row" style="gap:8px">
@@ -236,7 +252,7 @@
     <div class="tablewrap"><table><thead><tr id="rentabHead"></tr></thead><tbody id="rentabBody"></tbody></table></div>
     <p class="foot" id="rentabFoot" style="font-size:14px;color:var(--ink);background:var(--good-bg);padding:10px 14px;border-radius:10px"></p>
     <p class="foot">Edita el <b>Costo</b> de un producto suelto si no cruzó. Los productos marcados 🧩 son <b>kits</b>: su costo se calcula con las piezas que defines en la pestaña <b>🧩 Kits / Recetas</b>. El envío ya viene restado en tu neto. 💾 Se guarda.</p>
-  <div id="rentabAmz"></div>
+  </div><div id="rentabAmz" class="solo-amz"></div>
   </div>
 
   <div class="view hide" id="view-reabasto">
@@ -253,12 +269,12 @@
       </div>
       <p class="hint" id="reabRangeMsg" style="margin:8px 0 0"></p>
     </div>
-    <div class="tbar"><h3 class="vh">📤 Mandar a Full esta semana <span style="font-weight:400;color:var(--muted);font-size:12px">— de tu bodega a Full</span></h3>
+    <div class="solo-ml"><div class="tbar"><h3 class="vh">📤 Mandar a Full esta semana <span style="font-weight:400;color:var(--muted);font-size:12px">— de tu bodega a Full</span></h3>
       <button class="btn ghost sm" id="fullExport">⬇️ Lista para Full (CSV)</button></div>
     <p class="hint" id="reabWinNote" style="margin:0 0 6px"></p>
     <div class="tablewrap"><table><thead><tr id="fullHead"></tr></thead><tbody id="fullBody"></tbody></table></div>
-    <p class="foot" id="fullFoot"></p>
-    <div id="fbaBox" style="margin:14px 0"></div>
+    <p class="foot" id="fullFoot"></p></div>
+    <div id="fbaBox" class="solo-amz" style="margin:14px 0"></div>
     <h3 class="vh">🛒 Pedir a proveedor <span style="font-weight:400;color:var(--muted);font-size:12px">— te estás quedando bajo en total (bodega + Full)</span></h3>
     <p class="hint" id="reabWinNote2" style="margin:2px 0 6px"></p>
     <div class="tbar"><span></span><button class="btn ghost sm" id="provExport">⬇️ Lista de pedido (CSV)</button></div>
@@ -285,17 +301,17 @@
   <div class="view hide" id="view-movim"></div>
   <div class="view hide" id="view-reportes">
     <p class="hint" style="margin:4px 0 2px">Aquí subes <b>todos</b> tus reportes. Cada tarjeta dice qué hace y dónde bajar el archivo; el resultado aparece debajo.</p>
-    <h2 style="margin:20px 0 4px">🛒 Mercado Libre</h2>
+    <div class="solo-ml"><h2 style="margin:20px 0 4px">🛒 Mercado Libre</h2>
     <div id="slotVentasML"></div>
     <div id="slotPub"></div>
     <div class="card"><div id="slotFull"></div><div id="cuadreFullBox" style="margin-top:12px"></div></div>
     <div id="envFullBox"></div>
     <div class="card"><div id="slotBodega"></div></div>
-    <h2 style="margin:24px 0 4px">📦 Amazon</h2>
+    </div><div class="solo-amz"><h2 style="margin:24px 0 4px">📦 Amazon</h2>
     <div class="card"><div id="slotAmzInv"></div><div id="cuadreAmzBox" style="margin-top:12px"></div></div>
     <div id="gananciaBox"></div>
     <div class="card"><h3 class="vh">📤 Ventas de Amazon → dar salida (FBA + FBM)</h3><p class="hint">Sube el reporte <b>"Todos los pedidos"</b>. El ERP da salida a <b>TODAS</b> tus ventas: las de <b>FBA</b> (Amazon envía) bajan de tu <b>inventario de Amazon</b>, y las de <b>FBM</b> (tú envías) bajan de tu <b>bodega</b>. Cada venta queda con su <b># de pedido</b> en Movimientos. No cuenta dos veces lo ya registrado. Después usa el <b>Cuadre de Amazon</b> para ver si Amazon perdió piezas.</p><input type="file" id="amzFbmFile" accept=".txt,.csv,.xlsx"><div id="amzFbmMsg" class="hint" style="margin-top:4px"></div><div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line,#ece6e2)"><button class="btn ghost sm" id="btnReaplicarFBA">🔁 Corregir inventario con mis equivalencias de SKU</button><p class="hint" style="margin:5px 0 0">¿Tu producto se vende en Amazon con un SKU distinto al de tu ERP (ej. <b>DSLOT</b> = <b>13LOT</b>)? Primero escribe la equivalencia en la cajita ⚠️ de «Ganancia de Amazon»; luego dale aquí y las ventas de FBA ya registradas se mueven al SKU correcto para que baje tu inventario real.</p></div></div>
-    <h2 style="margin:24px 0 4px">💾 Respaldo</h2>
+    </div><h2 style="margin:24px 0 4px">💾 Respaldo</h2>
     <div id="slotRespaldo"></div>
   </div>
 
@@ -1096,7 +1112,7 @@ function renderRecetas(){
     const tieneOtro=comps.some(it=>!self.has(it.sku)&&!it.sc);
     const piezas=comps.map(it=>escapeHtml(it.sku)+'×'+num.format(it.qty)+(it.sc?' <small style="color:var(--muted)">(solo costo)</small>':'')).join(' + ');
     return '<tr><td class="prod" style="max-width:260px">'+escapeHtml(titulo)+scope+'<small>'+escapeHtml(k)+'</small></td><td>'+piezas+'</td><td>'+(tieneOtro?'<span style="font-size:10px;background:var(--accent,#e4846d);color:#fff;padding:1px 6px;border-radius:6px">combo · descuenta piezas</span>':'<span style="font-size:10px;color:var(--muted)">multiplica costo</span>')+'</td><td><b>'+mxn2.format(cv)+'</b></td><td style="white-space:nowrap">'+splitBtn+'<button class="btn ghost sm recEdit" data-k="'+escapeHtml(k)+'">✏️</button> <button class="btn ghost sm recDel" data-k="'+escapeHtml(k)+'" style="padding:3px 8px">✕</button></td></tr>'; }).join('');
-  v.innerHTML=
+  v.innerHTML='<div class="solo-ml">'+
     '<div class="card"><h3 class="vh">🧩 Kits y recetas — por publicación</h3>'+
     '<p class="hint">Define qué piezas salen por cada venta de una <b>publicación</b> (cada anuncio puede traer distinta cantidad: el mismo SKU se vende como 20 bolsas en un anuncio y 10 en otro). <b>Misma pieza</b> + cantidad = multiplica el costo. <b>Pieza distinta</b> = además le da salida a esa pieza de tu bodega.</p>'+
     '<div class="row" style="align-items:flex-end"><label class="field" style="flex:1;min-width:300px;position:relative"><b>Publicación (el anuncio) — busca por nombre</b><input type="text" id="recPubSearch" autocomplete="off" placeholder="escribe ej. termo, copa, bolsa, pack…" value="'+(RECPUB?escapeHtml(pubTitle(RECPUB)):'')+'"><div id="recPubDrop" class="ac-drop hide"></div></label>'+(RECPUB?'<div class="hint" style="align-self:center;padding-bottom:6px">✓ <b>'+escapeHtml(pubTitle(RECPUB))+'</b> · <a href="javascript:void(0)" id="recPubClear" style="color:var(--accent-d)">cambiar</a></div>':'')+'</div>'+
@@ -1109,7 +1125,7 @@ function renderRecetas(){
     '<div style="margin-top:12px"><button class="btn" id="recSave">✓ Guardar receta</button> <button class="btn ghost sm" id="recClear">Limpiar</button></div></div>'+
     '<div class="card"><div class="tbar"><h3 class="vh">📋 Recetas guardadas ('+keys.length+')</h3><button class="btn ghost sm" id="recSuggest">✨ Sugerir packs por título</button></div>'+
     (keys.length?'<div class="tablewrap"><table><thead><tr><th>Publicación</th><th>Piezas</th><th>Tipo</th><th>Costo/venta</th><th></th></tr></thead><tbody>'+savedRows+'</tbody></table></div><p class="foot">Las piezas distintas se descuentan <b>automáticamente</b> con cada venta — ya no las metas como salida manual.</p>':'<p class="hint">Aún no defines recetas. Cada publicación vende 1 pieza por venta.</p>')+
-    '</div>'+amzRecHtml();
+    '</div></div>'+amzRecHtml();
 }
 function amzRecTxt(comps){ return (comps||[]).map(c=>c.sku+' x'+num.format(parseNum(c.qty)||1)).join(' + '); }
 function amzRecParse(txt){ const out=[]; for(const part of (''+txt).split(/\s*[+,;]\s*/)){ const t=part.trim(); if(!t) continue; let m, sku, q;
@@ -1127,7 +1143,7 @@ function amzRecList(){ const M=new Map(), mapped=new Set(Object.values(AMZSKUMAP
   return [...M.values()].map(x=>({raw:x.raw,ped:x.ped.size,o:amzRecOrigen(x.raw)})).sort((a,b)=>(b.ped-a.ped)||a.raw.localeCompare(b.raw,'es')); }
 function amzRecHtml(){ const L=amzRecList(); if(!L.length) return '';
   const rev=L.filter(r=>r.o.t==='uno'||r.o.t==='split').length;
-  return '<div class="card" id="amzRecCard"><h3 class="vh">🛒 Recetas de Amazon ('+L.length+' SKUs)</h3>'+
+  return '<div class="card solo-amz" id="amzRecCard"><h3 class="vh">🛒 Recetas de Amazon ('+L.length+' SKUs)</h3>'+
     '<p class="hint">Qué piezas salen de tu inventario por <b>cada venta de Amazon</b>. Si no le pones receta de Amazon, usa la de Mercado Libre de ese SKU. Si en Amazon lo vendes como <b>otro pack o kit</b>, escríbele aquí su receta y esa manda. Formato: <code>12N x6 + 12G x1</code>. Aplica a las ventas que subas <b>de aquí en adelante</b> (no cambia las ya registradas).'+(rev?' <b style="color:var(--bad)">Revisa sobre todo las '+rev+' marcadas ⚠️</b>: hoy descuentan 1 pieza.':'')+'</p>'+
     '<div class="tablewrap" style="max-height:60vh"><table><thead><tr><th>SKU de Amazon</th><th>Producto</th><th>Pedidos</th><th>Hoy descuenta por venta</th><th>De dónde sale</th><th>Receta de Amazon</th></tr></thead><tbody>'+
     L.map(r=>{ const es=(AMZSKUMAP&&AMZSKUMAP[r.raw])||r.raw, propia=AMZREC[r.raw], comps=amzReceta(r.raw), pz=comps.reduce((a,c)=>a+(parseNum(c.qty)||1),0);
@@ -1539,7 +1555,7 @@ $('view-conc').addEventListener('click',e=>{
 function renderConc(){ const v=$('view-conc'); if(!v) return; CONC=loadJSON(LS_CONC,CONC); CONC.meses=CONC.meses||{};
   const meses=Object.keys(CONC.meses).sort().reverse(); if(!CONCSEL||!CONC.meses[CONCSEL]) CONCSEL=meses[0]||'';
   camzMatchAll();
-  v.innerHTML=concUploadHtml()+(CONCSEL?concMesHtml(CONC.meses[CONCSEL],meses):'<div class="card"><p class="hint" style="margin:0">Aún no has conciliado ningún mes. Sube tus reportes arriba y dale <b>Conciliar ▸</b>.</p></div>')+concAmzHtml(); }
+  v.innerHTML='<div class="solo-ml">'+concUploadHtml()+(CONCSEL?concMesHtml(CONC.meses[CONCSEL],meses):'<div class="card"><p class="hint" style="margin:0">Aún no has conciliado ningún mes. Sube tus reportes arriba y dale <b>Conciliar ▸</b>.</p></div>')+'</div><div class="solo-amz">'+concAmzHtml()+'</div>'; try{ renderDevAmz(); renderInicio(); }catch(e){ console.error(e); } }
 /* ---------- 🛒 CONCILIACIÓN AMAZON: extractos de liquidación (versión 2.0) ↔ banco ↔ ERP ---------- */
 let CAMZSEL='';
 const CAMZ_G=[['venta','🧾 Ventas (con IVA, envío y promos)'],['reemb','↩️ Reembolsos a clientas'],['com','📣 Comisiones Amazon'],['fba','📦 Tarifas FBA (Amazon envía)'],['env','🚚 Envíos Easy Ship (tú envías)'],['alm','🏬 Almacenamiento FBA'],['pub','📢 Publicidad'],['reembFBA','💸 Amazon te reembolsó (inventario dañado o perdido)'],['ret','🧾 Retenciones IVA/ISR (se acreditan)'],['otro','➕ Otros']];
@@ -1565,10 +1581,12 @@ function camzMatchAll(){ const A=CONC.amz; if(!A||!A.liq) return; let ch=false; 
 function camzErp(){ const refs=new Set(), libres=new Set(); for(const m of MOVS){ if(!/^Venta Amazon/.test(m.tipo||'')) continue; if(m.ref) refs.add(m.ref); else { const t=(m.nota||'').match(/· ([^·]+)$/); libres.add(t?t[1].trim():m.sku); } } return {refs,libres}; }
 function camzFul(o){ for(const id in (CONC.amz||{}).liq||{}){ const x=CONC.amz.liq[id].ord['O|'+o]; if(x&&x.ful) return x.ful; } const m=MOVS.find(m=>m.ref===o&&/^Venta Amazon/.test(m.tipo||'')); return m?(m.ubic==='fba'?'AFN':'MFN'):''; }
 function camzDevEstado(x){ if(camzFul(x.o)==='AFN') return 'fba'; if(MOVS.some(m=>(parseNum(m.entrada)||0)>0&&(m.ref===x.o||(m.nota||'').includes(x.o)))) return 'si'; return ((CONC.amz.dev||{})[x.o])||''; }
+function camzDevTxt(x){ const e=camzDevEstado(x); if(e==='fba') return '<span style="font-size:12px;color:var(--muted)">regresa a tu inventario de Amazon (lo ves en el Cuadre FBA)</span>'; if(e==='si') return '<span class="badge b-good">✔️ ya tiene entrada</span>'; if(e==='no') return '<span class="badge b-bad">✖️ no regresó</span> <button class="btn ghost sm camzDevUndo" data-o="'+escapeHtml(x.o)+'">Deshacer</button>';
+    return '<button class="btn sm camzDevOk" data-o="'+escapeHtml(x.o)+'" data-s="'+escapeHtml(x.s)+'" data-q="'+(x.q||1)+'">📥 Llegó → dar entrada</button> <button class="btn ghost sm camzDevNo" data-o="'+escapeHtml(x.o)+'">✖️ No regresó</button>'; }
 function concAmzHtml(){ const A=CONC.amz||{}, L=Object.values(A.liq||{}).sort((a,b)=>(''+b.fin).localeCompare(''+a.fin));
   const up='<div class="card"><h3 class="vh">🛒 Conciliación Amazon ↔ banco</h3><p class="hint" style="margin-top:0">Sube los <b>extractos de liquidación (versión 2.0)</b> de Amazon (puedes seleccionar varios). Reviso que cada pago de Amazon <b>llegue a tu BanBajío</b>, de dónde sale el dinero, los <b>reembolsos</b> y que cada pedido esté en tu ERP.</p>'+
-    '<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><input type="file" id="concAmzFiles" multiple accept=".txt,.tsv,.csv"></div><div id="concAmzMsg" class="hint"></div>'+
-    '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:600">📥 ¿Dónde los descargo?</summary><p style="font-size:13px;line-height:1.7;margin:8px 0 0">Seller Central → <b>Pagos</b> → pestaña <b>Todos los estados de cuenta</b> → en cada periodo dale <b>Descargar reporte versión 2.0</b>. Cada archivo es una quincena. Para confirmar que llegó al banco, sube arriba el <b>PDF de tu estado de cuenta</b> del mes en que se depositó.</p></details></div>';
+    '<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><input type="file" id="concAmzFiles" multiple accept=".txt,.tsv,.csv,.pdf"></div><div id="concAmzMsg" class="hint"></div>'+
+    '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:600">📥 ¿Dónde los descargo?</summary><p style="font-size:13px;line-height:1.7;margin:8px 0 0">Seller Central → <b>Pagos</b> → pestaña <b>Todos los estados de cuenta</b> → en cada periodo dale <b>Descargar reporte versión 2.0</b>. Cada archivo es una quincena. Para confirmar que llegó al banco, sube aquí mismo el <b>PDF de tu estado de cuenta</b> de BanBajío del mes en que se depositó.</p></details></div>';
   if(!L.length) return up;
   const meses=[...new Set(L.map(S=>S.dep.slice(0,7)))].sort().reverse(); if(!CAMZSEL||!meses.includes(CAMZSEL)) CAMZSEL=meses[0];
   const est=S=>{ if(!(S.tot>0)) return '<span class="badge b-warn">Amazon te cobró</span>'; const b=camzBanco(S); if(b) return '<span class="badge b-good">✅ '+escapeHtml(b.mv.f.slice(5).split('-').reverse().join('/'))+'</span>'; return camzTieneBanco(S)?'<span class="badge b-bad">❌ no aparece</span>':'<span class="badge b-warn">⏳ sube tu estado de cuenta de '+escapeHtml(concMesNombre(S.dep.slice(0,7)))+'</span>'; };
@@ -1594,8 +1612,7 @@ function concAmzHtml(){ const A=CONC.amz||{}, L=Object.values(A.liq||{}).sort((a
   const revHtml='<div class="card" style="background:'+(rev.length?'var(--warn-bg)':'var(--good-bg)')+'"><h3 class="vh">'+(rev.length?'⚠️ Para revisar':'✅ Amazon cuadra este mes')+'</h3>'+(rev.length?'<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">'+rev.map(x=>'<li>'+x+'</li>').join('')+'</ul>':'<p class="hint" style="margin:0">Todo lo que Amazon pagó llegó a tu banco y cada pedido está en tu ERP.</p>')+'</div>';
   const desg='<div class="tablewrap"><table><thead><tr><th>Concepto</th><th>Importe</th></tr></thead><tbody>'+CAMZ_G.filter(([k])=>g[k]).map(([k,t])=>'<tr><td>'+t+'</td><td class="'+(g[k]<0?'neg':'')+'">'+mxn2.format(g[k])+'</td></tr>').join('')+
     '<tr><td><b>= Amazon pagó</b></td><td><b>'+mxn2.format(Ls.reduce((a,S)=>a+S.tot,0))+'</b></td></tr></tbody></table></div>';
-  const devTxt=x=>{ const e=camzDevEstado(x); if(e==='fba') return '<span style="font-size:12px;color:var(--muted)">regresa a tu inventario de Amazon (lo ves en el Cuadre FBA)</span>'; if(e==='si') return '<span class="badge b-good">✔️ ya tiene entrada</span>'; if(e==='no') return '<span class="badge b-bad">✖️ no regresó</span> <button class="btn ghost sm camzDevUndo" data-o="'+escapeHtml(x.o)+'">Deshacer</button>';
-    return '<button class="btn sm camzDevOk" data-o="'+escapeHtml(x.o)+'" data-s="'+escapeHtml(x.s)+'" data-q="'+(x.q||1)+'">📥 Llegó → dar entrada</button> <button class="btn ghost sm camzDevNo" data-o="'+escapeHtml(x.o)+'">✖️ No regresó</button>'; };
+  const devTxt=camzDevTxt;
   const devHtml=refs.length?('<h3 class="vh" style="margin-top:14px">↩️ Reembolsos ('+refs.length+')</h3><div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Pedido</th><th>Producto</th><th>Te descontaron</th><th>¿Regresó la pieza?</th></tr></thead><tbody>'+
     refs.map(x=>'<tr><td>'+fc(x.f)+'</td><td style="white-space:nowrap">'+escapeHtml(x.o)+'</td><td class="prod" style="max-width:260px;white-space:normal">'+escapeHtml(nombreDe((AMZSKUMAP&&AMZSKUMAP[x.s])||x.s)||x.s)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(x.s)+'</span></td><td class="neg">'+mxn2.format(x.n)+'</td><td>'+devTxt(x)+'</td></tr>').join('')+'</tbody></table></div>'):'';
   const stTxt={ok:'<span class="badge b-good">✔️ en tu ERP</span>',viejo:'<span class="badge b-warn">en tu ERP sin # de pedido</span>',falta:'<span class="badge b-bad">❌ no está</span>'};
@@ -1604,12 +1621,13 @@ function concAmzHtml(){ const A=CONC.amz||{}, L=Object.values(A.liq||{}).sort((a
   const sel='<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0 8px"><b style="font-size:13px">📅 Mes del depósito:</b>'+meses.map(m=>'<button class="btn sm '+(m===CAMZSEL?'':'ghost')+' camzMes" data-m="'+m+'">'+concMesNombre(m)+'</button>').join('')+'</div>';
   return up+'<div class="card"><h3 class="vh">🛒 Pagos de Amazon ('+L.length+' extractos)</h3>'+tabla+sel+'<div class="kpis">'+kp.map(k=>`<div class="kpi ${k.c||''}"><div class="lbl">${k.l}</div><div class="val">${k.v}</div><div class="sub">${k.s||''}</div></div>`).join('')+'</div></div>'+
     revHtml+'<div class="card"><h3 class="vh">💵 De dónde sale lo que te pagó Amazon — '+concMesNombre(CAMZSEL)+'</h3>'+desg+devHtml+ordHtml+'</div>'; }
+function m2pre(){ return $('concAmzMsg'); }
 async function concAmzLoad(files){ const msg=$('concAmzMsg'); const ok=[], bad=[]; CONC.amz=CONC.amz||{}; CONC.amz.liq=CONC.amz.liq||{}; CONC.amz.dev=CONC.amz.dev||{};
-  for(const f of files){ try{ const S=camzParse(await f.text()); CONC.amz.liq[S.id]=S; ok.push(S); CAMZSEL=S.dep.slice(0,7); }catch(e){ bad.push(f.name+' ('+(e.message||e)+')'); } }
-  if(ok.length){ concSave(); renderConc(); }
-  const m2=$('concAmzMsg'); if(m2) m2.innerHTML=(ok.length?'✅ Cargué '+ok.length+' '+(ok.length===1?'extracto':'extractos')+' de Amazon.':'')+(bad.length?'<br>⚠️ No reconocí: '+bad.map(escapeHtml).join(', '):''); }
+  let nb=0; for(const f of files){ try{ if(/\.pdf$/i.test(f.name)){ if(m2pre()) m2pre().innerHTML='⏳ Leyendo tu estado de cuenta…'; await concLoadBanco(f); nb++; continue; } const S=camzParse(await f.text()); CONC.amz.liq[S.id]=S; ok.push(S); CAMZSEL=S.dep.slice(0,7); }catch(e){ bad.push(f.name+' ('+(e.message||e)+')'); } }
+  if(ok.length||nb){ concSave(); renderConc(); try{ renderResumen(); }catch(e){} }
+  const m2=$('concAmzMsg'); if(m2) m2.innerHTML=(ok.length?'✅ Cargué '+ok.length+' '+(ok.length===1?'extracto':'extractos')+' de Amazon.':'')+(nb?' ✅ Estado de cuenta cargado.':'')+(bad.length?'<br>⚠️ No reconocí: '+bad.map(escapeHtml).join(', '):''); }
 $('view-conc').addEventListener('change',e=>{ if(e.target.id==='concAmzFiles') concAmzLoad([...e.target.files]); });
-$('view-conc').addEventListener('click',e=>{ const b=e.target.closest('.camzMes,.camzDel,.camzDevOk,.camzDevNo,.camzDevUndo'); if(!b) return; const A=CONC.amz||{};
+document.addEventListener('click',e=>{ const b=e.target.closest('.camzMes,.camzDel,.camzDevOk,.camzDevNo,.camzDevUndo'); if(!b) return; const A=CONC.amz||{};
   if(b.classList.contains('camzMes')){ CAMZSEL=b.dataset.m; return renderConc(); }
   if(b.classList.contains('camzDel')){ if(!confirm('¿Quito este extracto de Amazon de la conciliación? (No toca tu inventario.)')) return; delete A.liq[b.dataset.id]; concSave(); return renderConc(); }
   const o=b.dataset.o; A.dev=A.dev||{};
@@ -1732,8 +1750,8 @@ function radarHtml(){ const C=(COMPUTED||[]).filter(p=>!HIDDEN.has(p.key)), uv=u
     if(d!=null&&d>2&&!confirm('⚠️ Tu última venta de Amazon registrada es del '+fechaBonita(ua)+' (hace '+d+' días).\n\nSi cuadras ahora y después subes ventas de Amazon de esos días, se van a descontar otra vez.\n\n¿Cuadrar de todos modos?')) return;
     return _aa(); }; })();
 
-function refresh(){ recomputeLive(); try{ applyHideRules(); }catch(e){ console.error(e); } ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderAmzRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); renderDevol(); renderConc(); }
-function showTab(name){ TAB=name; document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hide',v.id!=='view-'+name)); }
+function refresh(){ recomputeLive(); try{ applyHideRules(); }catch(e){ console.error(e); } ensureProductsForInventory(); compute(); renderResumen(); renderRentab(); renderAmzRentab(); renderReabasto(); renderInventario(); renderRecetas(); renderConciliacion(); renderOcultos(); renderMovimientos(); renderDevol(); renderConc(); try{ renderInicio(); renderResAmz(); renderDevAmz(); }catch(e){ console.error(e); } }
+function showTab(name){ if(name==='inicio') try{ renderInicio(); }catch(e){ console.error(e); } if(name==='resamz') try{ renderResAmz(); }catch(e){ console.error(e); } if(name==='devamz') try{ renderDevAmz(); }catch(e){ console.error(e); } TAB=name; document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hide',v.id!=='view-'+name)); }
 
 /* ---------- carga ventas ---------- */
 function onData(grid){ const t=rowsToTable(grid); if(!t||!t.headers.length){ alert('No pude leer datos.'); return; }
@@ -2007,7 +2025,63 @@ $('exampleBtn').onclick=loadExample; $('applyMap').onclick=applyMapping;
 ['comPct','comFija','envio','empaqueU','reabWin','targetFull','leadFull','targetFba','leadFba','targetTotal','umbralMargen','minSeed'].forEach(id=>$(id).addEventListener('input',()=>{saveCfg(); if(COMPUTED.length)refresh();}));
 $('concGoRestore').addEventListener('click',()=>{ const f=$('restoreFile'); f.scrollIntoView({block:'center'}); f.click(); });
 $('concOpenNow').addEventListener('click',()=>{ $('dataPanel').classList.add('hide'); $('mtabs').classList.remove('hide'); const ph=$('placeholder'); if(ph) ph.classList.add('hide'); renderConc(); showTab('conc'); window.scrollTo(0,0); });
-$('mtabs').addEventListener('click',e=>{ const t=e.target.closest('.mtab'); if(t) showTab(t.dataset.tab); });
+$('mtabs').addEventListener('click',e=>{ const c=e.target.closest('.chanbtn'); if(c) return setCanal(c.dataset.canal); const t=e.target.closest('.mtab'); if(t) showTab(t.dataset.tab); });
+/* ---------- 🔀 CANAL: Todo junto / Mercado Libre / Amazon ---------- */
+let CANAL=(()=>{ try{ return localStorage.getItem('erp_canal')||'todo'; }catch(e){ return 'todo'; } })();
+function setCanal(c){ CANAL=c; try{ localStorage.setItem('erp_canal',c); }catch(e){}
+  document.body.classList.remove('canal-todo','canal-ml','canal-amz'); document.body.classList.add('canal-'+c);
+  document.querySelectorAll('.chanbtn').forEach(b=>b.classList.toggle('on',b.dataset.canal===c));
+  document.querySelectorAll('.mtab').forEach(t=>t.classList.toggle('off',!(t.dataset.c||'').split(' ').includes(c)));
+  const cur=document.querySelector('.mtab[data-tab="'+TAB+'"]'); if(!cur||cur.classList.contains('off')||TAB==='inicio') showTab('inicio'); }
+function irA(tab,canal){ const t=document.querySelector('.mtab[data-tab="'+tab+'"]'); if(t&&!(t.dataset.c||'').split(' ').includes(CANAL)) setCanal(canal||(t.dataset.c||'todo').split(' ')[0]); showTab(tab); window.scrollTo(0,0); }
+document.addEventListener('click',e=>{ const g=e.target.closest('.goTab'); if(g) irA(g.dataset.tab,g.dataset.canal); });
+function inicioDatos(){ const C=(COMPUTED||[]).filter(p=>!HIDDEN.has(p.key)); let gan=0,ing=0,uds=0; for(const L of (CLINES||[])){ gan+=L.ganTotal||0; ing+=L.ingreso||0; uds+=L.unidades||0; }
+  const liqs=Object.values(((CONC.amz||{}).liq)||{}).sort((a,b)=>(''+b.fin).localeCompare(''+a.fin));
+  return {C,gan,ing,uds,AT:amzTotals(),IT:inventoryTotals(),nFull:C.filter(p=>p.enviarFull>0).length,nProv:C.filter(p=>p.needProv).length,nFba:C.filter(p=>p.needFba).length,
+    neg:C.filter(p=>p.inv&&((p.bodega||0)<0||(p.full||0)<0)).length,liqs,uv:ultVentaML(),ua:ultMovFecha(m=>/^Venta Amazon/.test(m.tipo||'')),uf:ultMovFecha(m=>m.nota==='cuadre'),uaz:ultMovFecha(m=>m.nota==='cuadre-amz')}; }
+function inicioPendientes(D){ const P=[], add=(c,lvl,t,tab,canal)=>P.push({c,lvl,t,tab,canal});
+  const dv=diasDesde(D.uv), da=diasDesde(D.ua);
+  if(dv==null||dv>7) add('ml','warn','🛒 Sube tus ventas de ML'+(D.uv?' (las tienes hasta el '+fechaBonita(D.uv)+')':''),'reportes','ml');
+  const dp=devolPend().length; if(dp) add('ml','warn','📥 '+dp+' '+(dp===1?'devolución':'devoluciones')+' de ML por recibir','devol','ml');
+  const cam=DEVOL.filter(d=>d.rec==='camino').length; if(cam) add('ml','bad','🚚 '+cam+' '+(cam===1?'paquete quedó':'paquetes quedaron')+' en el camino: reclámalos a ML','devol','ml');
+  if(D.nFull) add('ml','warn','📤 '+D.nFull+' '+(D.nFull===1?'producto':'productos')+' por mandar a Full','reabasto','ml');
+  const bm=Object.keys(CONC.banco||{}).sort().pop(), B=bm&&CONC.banco[bm], sc=B?B.movs.filter(mv=>mv.t==='car'&&!mv.c).length:0; if(sc) add('ml','warn','🏦 '+sc+' cargos del banco sin clasificar ('+concMesNombre(bm)+')','conc','ml');
+  if(da==null||da>7) add('amz','warn','📦 Sube "Todos los pedidos" de Amazon'+(D.ua?' (tienes ventas hasta el '+fechaBonita(D.ua)+')':''),'reportes','amz');
+  if(D.nFba) add('amz','warn','📦 '+D.nFba+' '+(D.nFba===1?'producto':'productos')+' por mandar a Amazon FBA','reabasto','amz');
+  D.liqs.filter(S=>S.tot>0&&!camzBanco(S)).forEach(S=>add('amz',camzTieneBanco(S)?'bad':'warn',camzTieneBanco(S)?('🏦 El pago de Amazon de '+mxn2.format(S.tot)+' ('+fechaBonita(S.dep)+') no aparece en tu banco'):('🏦 Confirma el pago de Amazon de '+mxn2.format(S.tot)+': sube tu estado de cuenta de '+concMesNombre(S.dep.slice(0,7))),'conc','amz'));
+  const rp=[]; D.liqs.forEach(S=>Object.values(S.ord).forEach(x=>{ if(x.t==='Refund'&&camzDevEstado(x)==='') rp.push(x); })); if(rp.length) add('amz','warn','↩️ '+rp.length+' '+(rp.length===1?'reembolso':'reembolsos')+' de Amazon: ¿regresó la pieza?','devamz','amz');
+  if(D.neg) add('todo','bad','🔴 '+D.neg+' '+(D.neg===1?'producto':'productos')+' con inventario en negativo: cuéntalos','inventario','todo');
+  if(D.nProv) add('todo','warn','🛒 '+D.nProv+' '+(D.nProv===1?'producto':'productos')+' por pedir a tu proveedor','reabasto',CANAL==='amz'?'amz':'ml');
+  return P.filter(x=>CANAL==='todo'||x.c===CANAL||x.c==='todo'); }
+function inicioCalendario(){ const D=inicioDatos(), mesPrev=(()=>{ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
+  const cm=Object.keys(CONC.meses||{}).sort().pop()||'', ul=D.liqs[0];
+  const R=[['ml','🛒 Ventas de Mercado Libre','cada lunes',D.uv,7],['ml','⚡ Reporte de Full (cuadre)','cada mes',D.uf,31],['ml','🏦 Mercado Pago + banco (conciliación)','cada mes',cm?cm+'-28':'',cm>=mesPrev?99999:0],
+    ['amz','📦 Todos los pedidos de Amazon','cada lunes',D.ua,7],['amz','💵 Liquidaciones de Amazon','cada 15 días',ul?ul.fin:'',17],['amz','📊 Inventario de Amazon FBA (cuadre)','cada mes',D.uaz,31]];
+  return R.filter(r=>CANAL==='todo'||r[0]===CANAL).map(([c,n,cada,f,lim])=>{ const d=diasDesde(f), ok=f&&(lim===99999||(d!=null&&d<=lim));
+    return '<div class="pend"><span>'+n+' <span style="color:var(--muted);font-size:12px">· '+cada+'</span></span><span style="white-space:nowrap"><span class="badge '+(ok?'b-good':'b-warn')+'">'+(f?(c==='ml'&&n.includes('conciliación')?concMesNombre(cm):'hace '+d+' d'):'sin subir')+'</span> <button class="btn ghost sm goTab" data-tab="'+(n.includes('conciliación')||n.includes('Liquidaciones')?'conc':'reportes')+'" data-canal="'+c+'">Subir ▸</button></span></div>'; }).join(''); }
+function renderInicio(){ const v=$('view-inicio'); if(!v) return; const D=inicioDatos(), P=inicioPendientes(D);
+  const kp=CANAL==='ml'?[['💵 Ingreso ML',mxn.format(D.ing),num.format(D.uds)+' uds en el periodo',''],['💰 Ganancia ML',mxn.format(D.gan),'ya menos tu costo',D.gan>=0?'good':'bad'],['📤 A mandar a Full',D.nFull,'productos','blue'],['🛒 A pedir a proveedor',D.nProv,'productos',D.nProv?'bad':'']]
+    :CANAL==='amz'?[['💵 Ventas Amazon',D.AT.ventas>0?mxn.format(D.AT.ventas):'—',D.AT.ventas>0?num.format(D.AT.u)+' uds':'sube el reporte de ganancia',''],['💰 Ganancia Amazon',D.AT.ventas>0?mxn.format(D.AT.gan):'—','ya menos tu costo',D.AT.gan>=0?'good':'bad'],['📦 A mandar a FBA',D.nFba,'productos','blue'],['💵 Último pago',D.liqs[0]?mxn2.format(D.liqs[0].tot):'—',D.liqs[0]?'depósito '+fechaBonita(D.liqs[0].dep):'sube tus liquidaciones',D.liqs[0]&&D.liqs[0].tot<0?'bad':'good']]
+    :[['💰 Ganancia ML',mxn.format(D.gan),'periodo seleccionado',D.gan>=0?'good':'bad'],['💰 Ganancia Amazon',D.AT.ventas>0?mxn.format(D.AT.gan):'—','acumulado del reporte',D.AT.gan>=0?'good':'bad'],['📦 Dinero en inventario',mxn.format(D.IT.total),'bodega + Full + FBA','blue'],['✅ Pendientes',P.length,P.length?'abajo te digo qué hacer':'todo al día',P.length?'warn':'good']];
+  const lunes=new Date().getDay()===1;
+  v.innerHTML='<div class="kpis">'+kp.map(([l,val,sub,c])=>'<div class="kpi '+c+'"><div class="lbl">'+l+'</div><div class="val">'+val+'</div><div class="sub">'+sub+'</div></div>').join('')+'</div>'+
+    (lunes?'<div class="card" style="background:var(--warn-bg)"><b>🗓️ Hoy es lunes: toca subir tus reportes de la semana.</b> Abajo ves cuáles.</div>':'')+
+    '<div class="card"><h3 class="vh">✅ Pendientes '+(P.length?'('+P.length+')':'')+'</h3>'+(P.length?P.map(x=>'<div class="pend"><span>'+x.t+'</span><span style="white-space:nowrap"><span class="badge '+(x.lvl==='bad'?'b-bad':'b-warn')+'">'+(x.lvl==='bad'?'urgente':'revisar')+'</span> <button class="btn ghost sm goTab" data-tab="'+x.tab+'" data-canal="'+x.canal+'">Ir ▸</button></span></div>').join(''):'<p class="hint" style="margin:0">🎉 Todo al día. No hay nada pendiente.</p>')+'</div>'+
+    '<div class="card"><h3 class="vh">📥 Tus reportes <span style="font-weight:400;color:var(--muted);font-size:12px">— cuándo los subiste por última vez</span></h3>'+inicioCalendario()+'</div>'; }
+function renderResAmz(){ const v=$('view-resamz'); if(!v) return; const D=inicioDatos(), A=CONC.amz||{}, L=D.liqs;
+  const pm={}; L.forEach(S=>{ const m=S.dep.slice(0,7), x=pm[m]||(pm[m]={v:0,c:0,r:0,ret:0,d:0}); x.v+=S.g.venta||0; x.c-=((S.g.com||0)+(S.g.fba||0)+(S.g.env||0)+(S.g.alm||0)+(S.g.pub||0)); x.r-=S.g.reemb||0; x.ret-=S.g.ret||0; x.d+=S.tot; });
+  const kp=[['💵 Ventas Amazon',D.AT.ventas>0?mxn.format(D.AT.ventas):'—',D.AT.ventas>0?num.format(D.AT.u)+' uds · reporte de ganancia':'sube el reporte de ganancia en Subir reportes',''],['💰 Ganancia Amazon',D.AT.ventas>0?mxn.format(D.AT.gan):'—','ya menos tu costo',D.AT.gan>=0?'good':'bad'],['📦 Dinero en Amazon FBA',mxn.format(D.IT.fbaVal),num.format(D.IT.fbaUds)+' uds en '+D.IT.fbaSkus+' productos','blue'],['📤 A mandar a FBA',D.nFba,'productos',D.nFba?'warn':'']];
+  const ms=Object.keys(pm).sort().reverse();
+  v.innerHTML='<div class="kpis">'+kp.map(([l,val,sub,c])=>'<div class="kpi '+c+'"><div class="lbl">'+l+'</div><div class="val">'+val+'</div><div class="sub">'+sub+'</div></div>').join('')+'</div>'+
+    '<div class="card"><h3 class="vh">💵 Lo que te pagó Amazon por mes <span style="font-weight:400;color:var(--muted);font-size:12px">— según tus liquidaciones</span></h3>'+(ms.length?'<div class="tablewrap"><table><thead><tr><th>Mes del depósito</th><th>Ventas</th><th>Costo de vender</th><th>%</th><th>Reembolsos</th><th>Retenciones</th><th>Te pagó</th></tr></thead><tbody>'+
+      ms.map(m=>{ const x=pm[m]; return '<tr><td>'+concMesNombre(m)+'</td><td>'+mxn.format(x.v)+'</td><td class="neg">−'+mxn.format(x.c)+'</td><td>'+(x.v?(x.c/x.v*100).toFixed(0)+'%':'—')+'</td><td class="neg">'+(x.r?'−'+mxn.format(x.r):'—')+'</td><td>'+mxn.format(x.ret)+'</td><td><b>'+mxn2.format(x.d)+'</b></td></tr>'; }).join('')+'</tbody></table></div><p class="foot">El detalle y si llegó a tu banco lo ves en <button class="btn ghost sm goTab" data-tab="conc" data-canal="amz">🏦 Conciliación ▸</button></p>':'<p class="hint" style="margin:0">Sube tus liquidaciones en <button class="btn ghost sm goTab" data-tab="conc" data-canal="amz">🏦 Conciliación ▸</button></p>')+'</div>'+
+    '<div class="card"><h3 class="vh">💰 Ganancia por producto en Amazon</h3>'+(amzGananciaHTML()||'<p class="hint" style="margin:0">Sube tu reporte de ganancia de Amazon en <button class="btn ghost sm goTab" data-tab="reportes" data-canal="amz">📥 Subir reportes ▸</button></p>')+'</div>'; }
+function renderDevAmz(){ const v=$('view-devamz'); if(!v) return; const L=Object.values(((CONC.amz||{}).liq)||{}), R=[];
+  L.forEach(S=>Object.values(S.ord).forEach(x=>{ if(x.t==='Refund') R.push(x); })); R.sort((a,b)=>(''+b.f).localeCompare(''+a.f));
+  const pend=R.filter(x=>camzDevEstado(x)===''), tot=R.reduce((a,x)=>a+x.n,0), fc=f=>f?f.slice(8,10)+'/'+f.slice(5,7)+'/'+f.slice(0,4):'';
+  v.innerHTML='<div class="kpis"><div class="kpi bad"><div class="lbl">↩️ Reembolsos</div><div class="val">'+R.length+'</div><div class="sub">'+mxn2.format(Math.abs(tot))+' que te descontó Amazon</div></div><div class="kpi '+(pend.length?'warn':'good')+'"><div class="lbl">📥 Por confirmar</div><div class="val">'+pend.length+'</div><div class="sub">'+(pend.length?'dime si regresó la pieza':'todo confirmado')+'</div></div></div>'+
+    '<div class="card"><h3 class="vh">↩️ Reembolsos de Amazon</h3><p class="hint" style="margin-top:0">Salen de tus <b>liquidaciones</b> (las subes en 🏦 Conciliación). Si la pieza regresó a tu casa, dale <b>📥 Llegó</b> y entra a tu bodega con su receta. Si la clienta la mandó a Amazon (FBA), regresa a tu inventario de Amazon.</p>'+
+    (R.length?'<div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Pedido</th><th>Producto</th><th>Te descontaron</th><th>¿Regresó la pieza?</th></tr></thead><tbody>'+R.map(x=>'<tr><td>'+fc(x.f)+'</td><td style="white-space:nowrap">'+escapeHtml(x.o)+'</td><td class="prod" style="max-width:280px;white-space:normal">'+escapeHtml(nombreDe((AMZSKUMAP&&AMZSKUMAP[x.s])||x.s)||x.s)+'<br><span style="color:var(--muted);font-size:11px">'+escapeHtml(x.s)+'</span></td><td class="neg">'+mxn2.format(x.n)+'</td><td>'+camzDevTxt(x)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="hint" style="margin:0">Sin reembolsos. Sube tus liquidaciones en <button class="btn ghost sm goTab" data-tab="conc" data-canal="amz">🏦 Conciliación ▸</button></p>')+'</div>'; }
 $('rentabHead').addEventListener('click',e=>{ const th=e.target.closest('th'); if(!th||!th.dataset.k) return; const k=th.dataset.k; if(RSORT.key===k) RSORT.dir*=-1; else RSORT={key:k,dir:-1}; renderRentab(); });
 $('invHead').addEventListener('click',e=>{ const th=e.target.closest('th'); if(!th||!th.dataset.k) return; const k=th.dataset.k; if(INVSORT.key===k) INVSORT.dir*=-1; else INVSORT={key:k,dir:-1}; renderInventario(); });
 $('fullHead').addEventListener('click',e=>{ const th=e.target.closest('th'); if(!th||!th.dataset.k) return; const k=th.dataset.k; if(FSORT.key===k) FSORT.dir*=-1; else FSORT={key:k,dir:-1}; renderReabasto(); });
@@ -2692,7 +2766,7 @@ function bootLocal(){
   if(SALES.length) aggregate();
   if(PRODUCTS.length || MOVS.length || SALES.length){
     $('dataPanel').classList.add('hide'); $('mtabs').classList.remove('hide'); const ph=$('placeholder'); if(ph) ph.classList.add('hide');
-    refresh(); showTab(PRODUCTS.length?'resumen':'movim');
+    refresh(); setCanal(CANAL); showTab('inicio');
   }
 }
 async function startup(){
