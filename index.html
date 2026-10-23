@@ -2125,7 +2125,7 @@ document.addEventListener('click',e=>{ const hd=e.target.closest('.plhead'); if(
   card.classList.toggle('plegada'); PLEG[card.dataset.plk]=card.classList.contains('plegada')?1:0; try{ localStorage.setItem('erp_plegado',JSON.stringify(PLEG)); }catch(e){} });
 (function(){ let t=null; new MutationObserver(()=>{ clearTimeout(t); t=setTimeout(()=>{ try{ plegarTarjetas(); }catch(e){ console.error(e); } },60); }).observe(document.body,{childList:true,subtree:true}); })();
 /* ---------- 📋 MODO CONTEO: por grupos, a ciegas, se aplica por partes y convive con ventas y devoluciones ---------- */
-let CNTG=(()=>{ try{ return sessionStorage.getItem('erp_cntg')||'neg'; }catch(e){ return 'neg'; } })(), CNTQ='', CNTOCULTA=false, CNTDIF=false;
+let CNTG=(()=>{ try{ return sessionStorage.getItem('erp_cntg')||'neg'; }catch(e){ return 'neg'; } })(), CNTQ=(()=>{ try{ return sessionStorage.getItem('erp_cntq')||''; }catch(e){ return ''; } })(), CNTOCULTA=(()=>{ try{ return sessionStorage.getItem('erp_cntoc')==='1'; }catch(e){ return false; } })(), CNTDIF=false;
 function cntSave(){ saveJSON(LS_CONTEO,CONTEO); }
 function cntMerge(a,b){ a=a||{act:null,hist:[]}; b=b||{act:null,hist:[]}; const H=new Map();
   for(const h of [...(a.hist||[]),...(b.hist||[])]){ const o=H.get(h.id); if(!o||(h.deshecho&&!o.deshecho)) H.set(h.id,h); }
@@ -2210,7 +2210,7 @@ document.addEventListener('click',e=>{ const t=e.target; if(!t.closest('#view-co
   if(t.id==='cntCsv') return dl('conteo-fisico.csv',['SKU','Producto','Contado el','ERP ese dia','Contaste','Diferencia','Valor'],cntDifs().map(x=>[x.sku,nombrePieza(x.sku),x.f,x.e,x.q,x.d,x.v]));
   if(t.classList.contains('cntUndo')) return cntDeshacer(t.dataset.id); });
 document.addEventListener('change',e=>{ const t=e.target; if(t.classList&&t.classList.contains('cntIn')){ cntSet(t.dataset.sku,t.value.trim()); const r=t.closest('.cntrow'); if(r){ r.classList.toggle('ok',t.value.trim()!==''); const ce=r.querySelector('.cntE'); if(ce) ce.innerHTML=cntInfo(t.dataset.sku); } cntContador(); }
-  if(t.id==='cntOculta'){ CNTOCULTA=t.checked; renderConteo(); }
+  if(t.id==='cntOculta'){ CNTOCULTA=t.checked; try{ sessionStorage.setItem('erp_cntoc',CNTOCULTA?'1':'0'); }catch(e){} renderConteo(); }
   if(t.id==='cntVer'){ CNTVER=t.checked; try{ localStorage.setItem('erp_cnt_ver',CNTVER?'1':'0'); }catch(e){} renderConteo(); } });
 document.addEventListener('keydown',e=>{ const t=e.target; if(t.classList&&t.classList.contains('cntIn')&&e.key==='Enter'){ e.preventDefault(); t.blur(); const all=[...document.querySelectorAll('.cntIn')], i=all.indexOf(t); if(all[i+1]) all[i+1].focus(); } });
 document.addEventListener('input',e=>{ if(e.target.classList&&e.target.classList.contains('cntIn')){ const r=e.target.closest('.cntrow'), ce=r&&r.querySelector('.cntE'); if(ce) ce.innerHTML=cntInfo(e.target.dataset.sku,e.target.value.trim()); return; }
@@ -2843,10 +2843,12 @@ async function cloudSaveNow(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return; try{
   if(!cur){ const {error:ie}=await SB.from('erp_state').insert({user_id:uid,data,rev:1,updated_at:stamp}); if(ie){ _cloudSaveFail(ie.message); return; } _cloudSaveOk(1,stamp); return; }
   // 3) CONFLICTO: la otra compu guardó algo más nuevo → NO lo piso; aviso para que lo traiga
   _cloudErr=''; cloudDotSet('🔄 juntando con tu otra sesión…');
-  if(!_cloudMerging){ _cloudMerging=true; if(await cloudLoad()){ location.reload(); return; } _cloudMerging=false; }
+  if(!_cloudMerging){ _cloudMerging=true; erpGuardaLugar(); if(await cloudLoad()){ location.reload(); return; } _cloudMerging=false; }
   cloudConflictBanner(true);
 }catch(e){ _cloudSaveFail((e&&e.message)||(''+e)); } }
 let _cloudMerging=false;
+function erpGuardaLugar(){ try{ const a=document.activeElement; if(a&&a.classList&&a.classList.contains('cntIn')) a.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){}
+  try{ sessionStorage.setItem('erp_scroll',''+Math.round(window.scrollY||0)); sessionStorage.setItem('erp_cntq',CNTQ||''); }catch(e){} }
 /* 🔄 Juntar: movimientos de las dos compus (por id), sin revivir los borrados; devoluciones procesadas; productos quitados */
 function cloudMergeInto(cd){ const P=(v,d)=>{ try{ return v!=null?JSON.parse(v):d; }catch(e){ return d; } }, L=k=>localStorage.getItem(k);
   const tomb=Object.assign({},P(cd[LS_MOVDEL],{}),P(L(LS_MOVDEL),{})), byId=new Map(); let kept=0, upd=0;
@@ -2881,7 +2883,7 @@ async function cloudPullIfNewer(force){
     const {data,error}=await SB.from('erp_state').select('rev').eq('user_id',CLOUD_USER.id).maybeSingle();
     const cloudRev=(data&&data.rev!=null)?data.rev:-1;
     if(!error && cloudRev>_cloudRev){
-      cloudDotSet('☁️ actualizando…'); cloudSplash('Trayendo los cambios de tu otra sesión…');
+      cloudDotSet('☁️ actualizando…'); erpGuardaLugar(); cloudSplash('Trayendo los cambios de tu otra sesión…');
       if(await cloudLoad()){ location.reload(); return; }
       const sp=$('cloudSplash'); if(sp) sp.remove();
     } else if(force){ cloudDotSet('☁️ ya estás al día'); setTimeout(()=>cloudDotSet('☁️ en la nube'),1800); }
@@ -3017,7 +3019,8 @@ function bootLocal(){
   if(SALES.length) aggregate();
   if(PRODUCTS.length || MOVS.length || SALES.length){
     $('dataPanel').classList.add('hide'); $('mtabs').classList.remove('hide'); const ph=$('placeholder'); if(ph) ph.classList.add('hide');
-    refresh(); setCanal(CANAL); { let t='inicio'; try{ t=sessionStorage.getItem('erp_tab')||'inicio'; }catch(e){} const el=document.querySelector('.mtab[data-tab="'+t+'"]'); showTab(el&&!el.classList.contains('off')?t:'inicio'); }
+    let t='inicio'; try{ t=sessionStorage.getItem('erp_tab')||'inicio'; }catch(e){} TAB=t; refresh(); setCanal(CANAL); { const el=document.querySelector('.mtab[data-tab="'+t+'"]'); showTab(el&&!el.classList.contains('off')?t:'inicio'); }
+    try{ const y=+sessionStorage.getItem('erp_scroll'); sessionStorage.removeItem('erp_scroll'); if(y>0) setTimeout(()=>window.scrollTo(0,y),60); }catch(e){}
   }
 }
 async function startup(){
