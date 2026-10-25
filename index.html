@@ -574,7 +574,7 @@ function ingestSales(){ if(!RAW||!RAW.rows) return 0; const m=MAPPING; const skC
     if(!esDevNow&&DEVOL.some(d=>d.vid===vid&&d.sku===key&&d.rec!=='si')) DEVOL=DEVOL.filter(d=>!(d.vid===vid&&d.sku===key&&d.rec!=='si'));   // la venta se confirmó (p. ej. la clienta no devolvió): ya no es devolución
     SALES.push({k:kk, f:parseFechaVenta(fechaCol?r[fechaCol]:''), vid, sku:key, pid:(pubCol?(''+(r[pubCol]||'')).replace(/\s/g,''):''), nom:(m.nombre?r[m.nombre]:'')||key, ubic:forma.includes('full')?'full':'bodega', u, ing, neto:fx?fx.neto:(m.neto?parseNum(r[m.neto]):0), com:fx?fx.com:(m.comision?Math.abs(parseNum(r[m.comision])):0), env:fx?fx.env:(m.envio?Math.abs(parseNum(r[m.envio])):0), pre, costo:(m.costo&&r[m.costo]!==''&&r[m.costo]!=null)?parseNum(r[m.costo]):null, stock:(m.stock&&r[m.stock]!==''&&r[m.stock]!=null)?parseNum(r[m.stock]):null});
     add++; }
-  let quit=0; if(cancelVids.size){ const b=SALES.length; SALES=SALES.filter(s=>!cancelVids.has(s.vid+'|'+s.sku)); quit=b-SALES.length; }   // quita solo el producto-línea cancelado, no toda la orden
+  let quit=0; if(cancelVids.size){ const b=SALES.length; SALES=SALES.filter(s=>!cancelVids.has(s.vid+'|'+s.sku)); quit=b-SALES.length; const now=Date.now(); for(const k of cancelVids) SALEDEL[k]=now; saveJSON(LS_SALEDEL,SALEDEL); }   // quita solo el producto-línea cancelado, no toda la orden
   saveJSON(LS_SALES,SALES); saveJSON(LS_DEVOL,DEVOL); return {add,quit:typeof quit==='number'?quit:0,cancel:cancelVids.size,upd}; }
 function migrateSku(oldK,newK){ oldK=(''+oldK).trim(); newK=(''+newK).trim(); if(!oldK||!newK||oldK===newK) return false;
   const ren=o=>{ if(o&&Object.prototype.hasOwnProperty.call(o,oldK)){ if(!(newK in o)) o[newK]=o[oldK]; delete o[oldK]; } };
@@ -644,7 +644,8 @@ function recomputeLive(){ const b={},f={},fb={},cs={},cq={}; for(const m of MOVS
   //  · Mercado Envíos (sale de tu casa): ya viene explotada en piezas por syncSalesMovs y restada arriba.
   //  · Full (ya está en Mercado Libre, no en tu casa): NO toca tu bodega. Sus piezas se contaron dentro de Full.
 }
-const LS_MOVDEL="ml_movdel_v3"; let MOVDEL=loadJSON(LS_MOVDEL,{}), MOVIDS=null;   // id → fecha en que se borró
+const LS_MOVDEL="ml_movdel_v3"; let MOVDEL=loadJSON(LS_MOVDEL,{}), MOVIDS=null;
+const LS_SALEDEL="ml_saledel_v3"; let SALEDEL=loadJSON(LS_SALEDEL,{});   // venta|sku cancelada → fecha (para juntar ventas entre aparatos sin revivirla)   // id → fecha en que se borró
 function movIdsVivos(){ return new Set(MOVS.filter(m=>m&&m.id&&m.nota!=='ventas').map(m=>m.id)); }
 function saveMovs(){ const now=movIdsVivos(); if(MOVIDS){ let n=0; for(const id of MOVIDS){ if(!now.has(id)){ MOVDEL[id]=Date.now(); n++; } } if(n) saveJSON(LS_MOVDEL,MOVDEL); } MOVIDS=now;
   saveJSON(LS_MOVS,MOVS); saveJSON(LS_APPLIED,APPLIED); }
@@ -2048,7 +2049,7 @@ $('provExport').onclick=()=>dl('pedido-proveedor.csv',['SKU','Producto','Vendido
 $('invExport').onclick=()=>dl('inventario.csv',['SKU','Producto','Bodega','Full','FBA','EnCamino','Total','CostoU','Valor'],COMPUTED.filter(p=>p.inv).sort((a,b)=>b.valorInv-a.valorInv).map(p=>[p.key,p.nombre,p.bodega,p.full,p.fba,p.camino,p.total,round2(p.costo),round2(p.valorInv)]));
 
 /* ---------- respaldo / portabilidad ---------- */
-const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_AMZ,LS_AMZSALES,LS_AMZSKUMAP,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED,LS_DEVOL,LS_RECSPLIT,LS_ZAPMAN,LS_CONC,LS_HIDERULES,LS_MOVDEL,LS_AMZREC,LS_CONTEO];
+const BACKUP_KEYS=[LS_OVR,LS_CFG,LS_FULL,LS_AMZ,LS_AMZSALES,LS_AMZSKUMAP,LS_CAM,LS_COST,LS_BOD,LS_FNAME,LS_INAME,LS_PUB,LS_PUBNAME,LS_MOVS,LS_APPLIED,LS_PRODS,LS_MAP,LS_MODE,LS_RECETA,LS_PUBINDEX,LS_LINES,LS_RECTS,LS_HIDDEN,LS_SALES,LS_SALEFILTER,LS_INVCORTE,LS_GASTOSMES,LS_REABRANGE,LS_FOTOS,LS_COUNTED,LS_DEVOL,LS_RECSPLIT,LS_ZAPMAN,LS_CONC,LS_HIDERULES,LS_MOVDEL,LS_AMZREC,LS_CONTEO,LS_SALEDEL];
 function hacerBackup(){ const data={}; BACKUP_KEYS.forEach(k=>{ const v=localStorage.getItem(k); if(v!=null) data[k]=v; });
   const blob=new Blob([JSON.stringify({app:'wedding-shop-erp',v:3,fecha:hoy(),data})],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='wedding-erp-respaldo-'+hoy()+'.json'; a.click();
@@ -2889,9 +2890,14 @@ function cloudMergeInto(cd){ const P=(v,d)=>{ try{ return v!=null?JSON.parse(v):
   cd[LS_MOVS]=JSON.stringify([...byId.values()]); cd[LS_MOVDEL]=JSON.stringify(tomb);
   const dm=new Map(P(cd[LS_DEVOL],[]).map(d=>[d.k,d])); for(const d of P(L(LS_DEVOL),[])){ const c=dm.get(d.k); if(!c||((d.recF||'')>(c.recF||''))) dm.set(d.k,d); } cd[LS_DEVOL]=JSON.stringify([...dm.values()]);
   cd[LS_HIDDEN]=JSON.stringify([...new Set([...P(cd[LS_HIDDEN],[]),...P(L(LS_HIDDEN),[])])]);
+  { const st=Object.assign({},P(cd[LS_SALEDEL],{}),P(L(LS_SALEDEL),{})), sm=new Map(), sinK=[];
+    for(const x of P(cd[LS_SALES],[])){ if(!x) continue; if(!x.k){ sinK.push(x); continue; } if(!st[x.vid+'|'+x.sku]) sm.set(x.k,x); }
+    for(const x of P(L(LS_SALES),[])){ if(!x||!x.k||st[x.vid+'|'+x.sku]) continue; const c=sm.get(x.k); if(!c){ sm.set(x.k,x); continue; }
+      if(!(c.ing>0)&&x.ing>0){ c.ing=x.ing; c.neto=x.neto; c.com=x.com; c.env=x.env; } if(!c.rc&&x.rc) c.rc=x.rc; if(!c.fs&&x.fs) c.fs=x.fs; }   // misma venta en los dos: se queda la de la nube y solo completa lo que le falte
+    cd[LS_SALES]=JSON.stringify([...sinK,...sm.values()]); cd[LS_SALEDEL]=JSON.stringify(st); }
   if(typeof LS_CONTEO!=='undefined') cd[LS_CONTEO]=JSON.stringify(cntMerge(P(cd[LS_CONTEO],{act:null,hist:[]}),P(L(LS_CONTEO),{act:null,hist:[]})));
   // lo demás que cambiaste en ESTE aparato y la nube no sabe juntar: se queda tu versión (no se pierde)
-  const esp=new Set([LS_MOVS,LS_MOVDEL,LS_DEVOL,LS_HIDDEN,typeof LS_CONTEO!=='undefined'?LS_CONTEO:'']);
+  const esp=new Set([LS_MOVS,LS_MOVDEL,LS_DEVOL,LS_HIDDEN,LS_SALES,LS_SALEDEL,typeof LS_CONTEO!=='undefined'?LS_CONTEO:'']);
   for(const k of P(L('erp_dirty_keys'),[])){ if(!esp.has(k)&&BACKUP_KEYS.includes(k)&&L(k)!=null) cd[k]=L(k); }
   return {kept,upd}; }
 async function cloudLoad(){ if(!CLOUD_ON||!SB||!CLOUD_USER) return false; try{
