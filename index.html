@@ -2188,7 +2188,8 @@ function cntAplicar(){ const A=CONTEO.act; if(!A) return; const all=cntDifs(), D
   CONTEO.hist.unshift({id:A.id+'-'+Date.now(),actId:A.id,tipo:'lote',ts:Date.now(),fecha:hoyF,contados:all.length,ajustes:D.length,sobra:+sob.reduce((a,x)=>a+x.v,0).toFixed(2),falta:+fal.reduce((a,x)=>a+x.v,0).toFixed(2),ids,skus:all.map(x=>x.sku)});
   CNTDIF=false; cntSave(); saveMovs(); recomputeLive(); afterMov(); renderConteo(); alert('✅ Listo: '+D.length+' ajustes aplicados. Puedes seguir contando cuando quieras.'); }
 function cntTerminar(){ const A=CONTEO.act; if(!A) return; const pend=Object.values(A.items).filter(x=>!x.ap).length;
-  if(!confirm((pend?'⚠️ Tienes '+pend+' productos contados SIN aplicar; si terminas se descartan.\n\n':'')+'¿Termino este conteo? (Lo que ya aplicaste se queda.)')) return;
+  if(pend){ alert('Primero aplica lo que contaste: 🔎 Ver diferencias → ✅ Aplicar esta parte.'); return; }
+  if(!confirm('¿Cierro este conteo? Todo lo que contaste ya está aplicado. Para tu siguiente conteo empiezas uno nuevo.')) return;
   CONTEO.hist=CONTEO.hist||[]; CONTEO.hist.unshift({id:A.id+'-fin',actId:A.id,tipo:'fin',ts:Date.now(),fecha:hoy(),contados:Object.keys(A.items).length}); CONTEO.act=null; CNTDIF=false; cntSave(); renderConteo(); }
 function cntDeshacer(id){ const h=(CONTEO.hist||[]).find(x=>x.id===id); if(!h) return; if(!confirm('¿Deshago los '+h.ajustes+' ajustes de esta parte del conteo? Esos productos regresan a como estaban y quedan para volver a contar.')) return;
   const set=new Set(h.ids||[]); MOVS=MOVS.filter(m=>!set.has(m.id)); h.deshecho=hoy(); if(CONTEO.act&&CONTEO.act.id===h.actId) for(const k of (h.skus||[])) if(CONTEO.act.items[k]) delete CONTEO.act.items[k].ap;
@@ -2232,7 +2233,7 @@ function renderConteo(){ const v=$('view-conteo'); if(!v) return; CONTEO=loadJSO
     '<div class="cntchips">'+chip('neg','⚠️ Negativos',[...negS])+chip('top','⭐ Más vendidos',[...topS])+gs.map(g=>chip(g,escapeHtml(g),G[g])).join('')+(otros.length?chip('otros','Otros',otros):'')+chip('todos','Todos',U)+'</div>'+
     '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:2px 0 6px"><input type="checkbox" id="cntOculta" '+(CNTOCULTA?'checked':'')+' style="width:auto"> Ocultar los que ya conté</label>'+(A.ciego?'<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:2px 0 6px"><input type="checkbox" id="cntVer" '+(CNTVER?'checked':'')+' style="width:auto"> Ver cuánto tiene el ERP y la diferencia</label>':'')+
     (arr.length?arr.map(row).join(''):'<p class="hint">'+(q?'No encontré ese producto.':'Ya contaste todo este grupo. 🎉')+'</p>')+
-    '<div class="row" style="gap:8px;margin-top:12px;position:sticky;bottom:0;background:var(--card);padding:8px 0;flex-wrap:wrap"><button class="btn" id="cntDif">🔎 Ver diferencias ('+nPend+')</button><button class="btn ghost sm" id="cntFin">🏁 Terminar conteo</button></div></div>'+hist; }
+    '<div class="row" style="gap:8px;margin-top:12px;position:sticky;bottom:0;background:var(--card);padding:8px 0;flex-wrap:wrap"><button class="btn" id="cntDif">🔎 Ver diferencias ('+nPend+')</button>'+(nPend||!its.length?'':'<button class="btn ghost sm" id="cntFin">🏁 Cerrar conteo</button>')+'</div></div>'+hist; }
 let CNTDQ='', CNTDT='dif', CNTDG='', CNTDO='v';   // filtros de la vista de diferencias
 let CNTVER=(()=>{ try{ return localStorage.getItem('erp_cnt_ver')==='1'; }catch(e){ return false; } })();   // ver ERP + diferencia mientras cuentas (por aparato)
 function cntVe(){ const A=CONTEO.act; return !!A&&(!A.ciego||CNTVER); }
