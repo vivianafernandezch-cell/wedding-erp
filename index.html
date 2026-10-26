@@ -1902,13 +1902,18 @@ function applyFullFile(){ if(!RAWFULL||!FULLMAP.sku||!FULLMAP.full){alert('Elige
   const H=RAWFULL.headers||[]; const camIdx=H.findIndex(h=>/en camino a full/i.test(h)||/^unidades en camino/i.test(h));
   const camCols = camIdx>=0 ? [H[camIdx+1],H[camIdx+2]].filter(Boolean) : (FULLMAP.camino?[FULLMAP.camino]:[]);
   const sumCam = r => camCols.reduce((a,cc)=>a+(parseNum(r[cc])||0),0);
+  // Cuadre con TODO lo tuyo dentro de Full, no solo lo apto: + "En transferencia", "Devueltas por el comprador" y "Temporalmente no aptas" (extraviadas en búsqueda / en revisión / ventas canceladas).
+  // Así las piezas que ML mueve entre bodegas o revisa no rebotan cada semana en el cuadre. NO cuentan "Pendientes de ingreso" (aún no llegan) ni "No aptas para vender".
+  const S0=RAWFULL.rows[0]||{}, S1=RAWFULL.rows[1]||{}, subT=h=>((S0[h]||'')+' '+(S1[h]||'')).toLowerCase();
+  const extCols=H.filter(h=>h!==FULLMAP.full&&/transferencia|devueltas|temporalmente|extraviad|en revisi|ventas cancel/.test(subT(h)));
+  const sumExt = r => extCols.reduce((a,cc)=>a+(parseNum(r[cc])||0),0); let totExt=0;
   for(const r of RAWFULL.rows){ const sku=(r[FULLMAP.sku]||'').trim(); if(!sku) continue;
     // valor TAL CUAL del reporte (en unidades/sets como ML) — el kit NO infla la cantidad. Si la publicación está marcada "separar en Full", reparte la cantidad en sus piezas distintas.
-    const qty=parseNum(r[FULLMAP.full]), cam=sumCam(r), pid=fPubCol?(r[fPubCol]||''):'', id=(''+pid).replace(/\D/g,'');
+    const ext=extCols.length?sumExt(r):0, qty=parseNum(r[FULLMAP.full])+ext, cam=extCols.length?0:sumCam(r), pid=fPubCol?(r[fPubCol]||''):'', id=(''+pid).replace(/\D/g,''); totExt+=ext;
     for(const ds of fullSkus(sku,pid)){ FULL[ds]=(FULL[ds]||0)+qty; if(cam) CAMINO[ds]=(CAMINO[ds]||0)+cam; if(fNameCol&&r[fNameCol]&&!FULLNAME[ds]) FULLNAME[ds]=r[fNameCol]; if(id&&!PUBID[ds]) PUBID[ds]=id; } }
   saveJSON(LS_FULL,FULL); saveJSON(LS_CAM,CAMINO); saveJSON(LS_FNAME,FULLNAME); saveJSON(LS_PUB,PUBID);
   aggregate();  // re-arma productos para incluir los SKUs que están en Full aunque no vendieron
-  $('fullMsg').textContent='✓ Apliqué tu stock de Full ('+Object.keys(FULL).length+' SKUs).'; refresh(); }
+  $('fullMsg').textContent='✓ Apliqué tu stock de Full ('+Object.keys(FULL).length+' SKUs'+(totExt?'; incluye '+num.format(totExt)+' u. en transferencia, devueltas o en revisión':'')+').'; refresh(); }
 $('applyFull').addEventListener('click',applyFullFile);
 // Amazon FBA (cuadre)
 $('amzFile').addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f) return; $('amzMsg').innerHTML='<span class="spin"></span>Leyendo…';
